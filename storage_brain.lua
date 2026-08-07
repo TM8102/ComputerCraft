@@ -90,10 +90,10 @@ end
 local itemConfig = {}
 
 local validSides = {
-    top = true,
-    bottom = true,
+    top = false,
+    bottom = false,
     left = true,
-    right = true
+    right = false
 }
 
 local function validateConfig(
