@@ -116,6 +116,32 @@ return {
             stopAt = 100
         }
     },
+    ["mysticalagriculture:dragon_egg_essence"] = {
+        displayName = "Dragon Egg Essence",
+        target = 65500,
+
+        machine = {
+            computerID = 4,
+            machineKey = "dragon_essence",
+            side = "back",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
+    ["mysticalagriculture:soulium_essence"] = {
+        displayName = "Soulium Essence",
+        target = 65500,
+
+        machine = {
+            computerID = 4,
+            machineKey = "solium_essence",
+            side = "left",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
     ["industrialforegoing:meat"] = {
         displayName = "Liquid Meat",
         target = 32000,
