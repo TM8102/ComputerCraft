@@ -1,7 +1,7 @@
 local modemSide = "back"
 
-local targetsURL =
-    "https://raw.githubusercontent.com/TM8102/ComputerCraft/main/targets.lua"
+local targetsAPI =
+    "https://api.github.com/repos/TM8102/ComputerCraft/contents/targets.lua?ref=main"
 
 local configFile = "targets.lua"
 local tempConfigFile = "targets_new.lua"
@@ -24,7 +24,6 @@ local configStatusProtocol = "config_status"
 
 local updateInterval = 2
 local configUpdateInterval = 300
-
 local computerID = os.getComputerID()
 
 if not peripheral.isPresent(modemSide) then
@@ -34,11 +33,11 @@ rednet.open(modemSide)
 
 local itemConfig = {}
 local knownItems = {}
-
 local localMachines = {}
 local machineBySide = {}
 local machineByKey = {}
 local machineSides = {}
+local lastConfigStatus = "LOCAL"
 
 local validSides = {
     top = true,
@@ -58,7 +57,6 @@ local function validateConfig(config)
         if type(itemID) ~= "string" then
             return false, "Invalid item ID"
         end
-
         if type(settings) ~= "table" then
             return false, "Invalid config for " .. itemID
         end
@@ -70,7 +68,6 @@ local function validateConfig(config)
 
         if settings.machine then
             local machine = settings.machine
-
             machine.computerID = tonumber(machine.computerID)
             machine.startBelow = tonumber(machine.startBelow) or 50
             machine.stopAt = tonumber(machine.stopAt) or 100
@@ -78,12 +75,9 @@ local function validateConfig(config)
             if not machine.computerID then
                 return false, "Missing computerID for " .. itemID
             end
-
-            if type(machine.machineKey) ~= "string"
-                or machine.machineKey == "" then
+            if type(machine.machineKey) ~= "string" or machine.machineKey == "" then
                 return false, "Missing machineKey for " .. itemID
             end
-
             if not validSides[machine.side] then
                 return false, "Invalid machine side for " .. itemID
             end
@@ -93,7 +87,7 @@ local function validateConfig(config)
     return true
 end
 
-local function installDownloadedConfig(contents)
+local function installConfig(contents)
     if fs.exists(tempConfigFile) then
         fs.delete(tempConfigFile)
     end
@@ -102,7 +96,6 @@ local function installDownloadedConfig(contents)
     if not file then
         return false, "COULD NOT WRITE TEMP CONFIG"
     end
-
     file.write(contents)
     file.close()
 
@@ -121,7 +114,6 @@ local function installDownloadedConfig(contents)
     if fs.exists(configFile) then
         fs.delete(configFile)
     end
-
     fs.move(tempConfigFile, configFile)
     itemConfig = config
 
@@ -135,20 +127,35 @@ local function installDownloadedConfig(contents)
 end
 
 local function downloadTargets()
-    local response, httpError = http.get(targetsURL)
+    local response, httpError = http.get(
+        targetsAPI,
+        {
+            ["User-Agent"] = "CC-Tweaked",
+            ["Accept"] = "application/vnd.github.raw+json",
+            ["Cache-Control"] = "no-cache"
+        }
+    )
 
     if not response then
-        return false, "GITHUB DOWNLOAD FAILED: " .. tostring(httpError)
+        return false, "GITHUB API FAILED: " .. tostring(httpError)
     end
 
+    local code = response.getResponseCode and response.getResponseCode() or 200
     local contents = response.readAll()
     response.close()
 
+    if code < 200 or code >= 300 then
+        return false, "GITHUB HTTP " .. tostring(code)
+    end
     if not contents or contents == "" then
         return false, "EMPTY GITHUB RESPONSE"
     end
 
-    return installDownloadedConfig(contents)
+    local ok, err = installConfig(contents)
+    if ok then
+        lastConfigStatus = "GITHUB API"
+    end
+    return ok, err
 end
 
 local function loadLocalConfig()
@@ -167,21 +174,8 @@ local function loadLocalConfig()
     end
 
     itemConfig = config
+    lastConfigStatus = "LOCAL CACHE"
     return true
-end
-
-local downloaded, downloadError = downloadTargets()
-if not downloaded then
-    print("GitHub unavailable:")
-    print(tostring(downloadError))
-    print("Using local targets.lua...")
-
-    local loaded, loadError = loadLocalConfig()
-    if not loaded then
-        error("Could not load targets.lua: " .. tostring(loadError))
-    end
-else
-    print("targets.lua updated.")
 end
 
 local function makeDisplayName(itemID)
@@ -193,13 +187,9 @@ end
 
 local function getDisplayName(itemID)
     local settings = itemConfig[itemID]
-
-    if settings
-        and settings.displayName
-        and settings.displayName ~= "" then
+    if settings and settings.displayName and settings.displayName ~= "" then
         return settings.displayName
     end
-
     return makeDisplayName(itemID)
 end
 
@@ -219,9 +209,7 @@ local function rebuildLocalMachines()
     for itemID, settings in pairs(itemConfig) do
         local machine = settings.machine
 
-        if machine
-            and tonumber(machine.computerID) == computerID then
-
+        if machine and tonumber(machine.computerID) == computerID then
             local side = machine.side
             local record = machineBySide[side]
 
@@ -234,18 +222,14 @@ local function rebuildLocalMachines()
                     targets = {},
                     lastCommand = 0
                 }
-
                 machineBySide[side] = record
                 localMachines[#localMachines + 1] = record
                 machineSides[side] = true
             end
 
             record.itemIDs[#record.itemIDs + 1] = itemID
-            record.machineKeys[#record.machineKeys + 1] =
-                machine.machineKey
-            record.targets[itemID] =
-                tonumber(settings.target) or 0
-
+            record.machineKeys[#record.machineKeys + 1] = machine.machineKey
+            record.targets[itemID] = tonumber(settings.target) or 0
             machineByKey[machine.machineKey] = record
         end
     end
@@ -255,49 +239,51 @@ local function rebuildLocalMachines()
     end
 end
 
+local downloaded, downloadError = downloadTargets()
+if not downloaded then
+    print("GitHub update failed:")
+    print(tostring(downloadError))
+    print("Using local targets.lua...")
+
+    local loaded, loadError = loadLocalConfig()
+    if not loaded then
+        error("Could not load targets.lua: " .. tostring(loadError))
+    end
+else
+    print("targets.lua updated from GitHub API.")
+end
+
 rebuildLocalMachines()
 
-local function scanItemInventory(peripheralObject, amounts)
-    local ok, items = pcall(function()
-        return peripheralObject.list()
-    end)
-
+local function scanItemInventory(p, amounts)
+    local ok, items = pcall(p.list)
     if not ok or type(items) ~= "table" then
         return false, tostring(items)
     end
 
     for _, stack in pairs(items) do
-        if type(stack) == "table"
-            and type(stack.name) == "string" then
-
+        if type(stack) == "table" and type(stack.name) == "string" then
             amounts[stack.name] =
                 (amounts[stack.name] or 0)
                 + (tonumber(stack.count) or 0)
         end
     end
-
     return true
 end
 
-local function scanFluidInventory(peripheralObject, amounts)
-    local ok, tanks = pcall(function()
-        return peripheralObject.tanks()
-    end)
-
+local function scanFluidInventory(p, amounts)
+    local ok, tanks = pcall(p.tanks)
     if not ok or type(tanks) ~= "table" then
         return false, tostring(tanks)
     end
 
     for _, tank in pairs(tanks) do
-        if type(tank) == "table"
-            and type(tank.name) == "string" then
-
+        if type(tank) == "table" and type(tank.name) == "string" then
             amounts[tank.name] =
                 (amounts[tank.name] or 0)
                 + (tonumber(tank.amount) or 0)
         end
     end
-
     return true
 end
 
@@ -318,46 +304,26 @@ local function scanDirectStorage()
 
                 if type(p.list) == "function" then
                     used = true
-
-                    local ok, readError =
-                        scanItemInventory(p, amounts)
-
+                    local ok, err = scanItemInventory(p, amounts)
                     if ok then
-                        detectedSources[#detectedSources + 1] = {
-                            side = side,
-                            type = "item"
-                        }
+                        detectedSources[#detectedSources + 1] = { side = side, type = "item" }
                     else
-                        errors[#errors + 1] =
-                            string.upper(side)
-                            .. " ITEM: "
-                            .. tostring(readError)
+                        errors[#errors + 1] = string.upper(side) .. " ITEM: " .. tostring(err)
                     end
                 end
 
                 if type(p.tanks) == "function" then
                     used = true
-
-                    local ok, readError =
-                        scanFluidInventory(p, amounts)
-
+                    local ok, err = scanFluidInventory(p, amounts)
                     if ok then
-                        detectedSources[#detectedSources + 1] = {
-                            side = side,
-                            type = "fluid"
-                        }
+                        detectedSources[#detectedSources + 1] = { side = side, type = "fluid" }
                     else
-                        errors[#errors + 1] =
-                            string.upper(side)
-                            .. " FLUID: "
-                            .. tostring(readError)
+                        errors[#errors + 1] = string.upper(side) .. " FLUID: " .. tostring(err)
                     end
                 end
 
                 if not used then
-                    errors[#errors + 1] =
-                        string.upper(side)
-                        .. " NOT STORAGE"
+                    errors[#errors + 1] = string.upper(side) .. " NOT STORAGE"
                 end
             end
         end
@@ -376,11 +342,9 @@ end
 
 local function sendStorageManifest()
     local keys = {}
-
     for itemID in pairs(knownItems) do
         keys[#keys + 1] = itemID
     end
-
     table.sort(keys)
 
     rednet.broadcast({
@@ -399,7 +363,6 @@ local function sendStorageUpdate(itemID, amount)
     end
 
     local target = tonumber(settings.target) or 0
-
     rednet.broadcast({
         messageType = "inventory_update",
         storageKey = itemID,
@@ -407,10 +370,7 @@ local function sendStorageUpdate(itemID, amount)
         displayName = getDisplayName(itemID),
         amount = tonumber(amount) or 0,
         targetAmount = target,
-        percent =
-            target > 0
-            and ((tonumber(amount) or 0) / target * 100)
-            or 0,
+        percent = target > 0 and ((tonumber(amount) or 0) / target * 100) or 0,
         found = true,
         online = true,
         error = nil,
@@ -422,14 +382,11 @@ end
 
 local function sendMachineStatus(machine)
     for _, itemID in ipairs(machine.itemIDs) do
+        local settings = itemConfig[itemID]
         rednet.broadcast({
             messageType = "resource_machine_status",
             itemID = itemID,
-            machineKey =
-                itemConfig[itemID]
-                and itemConfig[itemID].machine
-                and itemConfig[itemID].machine.machineKey
-                or nil,
+            machineKey = settings and settings.machine and settings.machine.machineKey or nil,
             side = machine.side,
             state = machine.state == true,
             target = machine.targets[itemID],
@@ -447,17 +404,12 @@ local function sendAllMachineStatus()
 end
 
 local function reportStorage()
-    local amounts, detectedSources, errors =
-        scanDirectStorage()
-
+    local amounts, detectedSources, errors = scanDirectStorage()
     updateKnownItems(amounts)
     sendStorageManifest()
 
     for itemID in pairs(knownItems) do
-        sendStorageUpdate(
-            itemID,
-            amounts[itemID] or 0
-        )
+        sendStorageUpdate(itemID, amounts[itemID] or 0)
     end
 
     return amounts, detectedSources, errors
@@ -469,34 +421,22 @@ local function processAutoSet(message)
     if message.side then
         machine = machineBySide[message.side]
     end
-
-    if not machine
-        and type(message.machineKey) == "string" then
+    if not machine and type(message.machineKey) == "string" then
         machine = machineByKey[message.machineKey]
     end
-
-    if not machine
-        and type(message.machineKeys) == "table" then
+    if not machine and type(message.machineKeys) == "table" then
         for _, machineKey in ipairs(message.machineKeys) do
             machine = machineByKey[machineKey]
-            if machine then
-                break
-            end
+            if machine then break end
         end
     end
-
     if not machine then
         return
     end
 
     machine.state = message.state == true
     machine.lastCommand = os.epoch("utc")
-
-    redstone.setOutput(
-        machine.side,
-        machine.state
-    )
-
+    redstone.setOutput(machine.side, machine.state)
     sendMachineStatus(machine)
 end
 
@@ -513,7 +453,6 @@ end
 
 local function forceTargetsRefresh()
     local success, refreshError = downloadTargets()
-
     if not success then
         sendRefreshStatus(false, refreshError)
         return false
@@ -523,13 +462,11 @@ local function forceTargetsRefresh()
     reportStorage()
     sendAllMachineStatus()
     sendRefreshStatus(true, nil)
-
     return true
 end
 
 local function drawLocalScreen()
-    local amounts, detectedSources, errors =
-        scanDirectStorage()
+    local amounts, detectedSources, errors = scanDirectStorage()
 
     term.setBackgroundColor(colors.black)
     term.setTextColor(colors.white)
@@ -539,30 +476,18 @@ local function drawLocalScreen()
     print("STORAGE + MACHINE NODE")
     print("======================")
     print("Computer: " .. computerID)
-    print("Config: GitHub")
+    print("Config: " .. lastConfigStatus)
     print("")
 
     print("STORAGE:")
-
     if #detectedSources == 0 then
         term.setTextColor(colors.red)
         print(" NONE FOUND")
         term.setTextColor(colors.white)
     else
         for _, source in ipairs(detectedSources) do
-            if source.type == "fluid" then
-                term.setTextColor(colors.lightBlue)
-            else
-                term.setTextColor(colors.lime)
-            end
-
-            print(
-                " "
-                .. string.upper(source.side)
-                .. " "
-                .. string.upper(source.type)
-            )
-
+            term.setTextColor(source.type == "fluid" and colors.lightBlue or colors.lime)
+            print(" " .. string.upper(source.side) .. " " .. string.upper(source.type))
             term.setTextColor(colors.white)
         end
     end
@@ -571,17 +496,14 @@ local function drawLocalScreen()
         print("")
         term.setTextColor(colors.orange)
         print("WARNINGS:")
-
         for _, err in ipairs(errors) do
             print(" " .. tostring(err))
         end
-
         term.setTextColor(colors.white)
     end
 
     print("")
     print("RESOURCES:")
-
     local sortedKnown = {}
     for itemID in pairs(knownItems) do
         sortedKnown[#sortedKnown + 1] = itemID
@@ -593,42 +515,19 @@ local function drawLocalScreen()
     else
         for _, itemID in ipairs(sortedKnown) do
             print(" " .. getDisplayName(itemID))
-            print(
-                "  "
-                .. tostring(
-                    math.floor(
-                        amounts[itemID] or 0
-                    )
-                )
-            )
+            print("  " .. tostring(math.floor(amounts[itemID] or 0)))
         end
     end
 
     print("")
     print("MACHINES:")
-
     if #localMachines == 0 then
         print(" NONE")
     else
         for _, machine in ipairs(localMachines) do
-            print(
-                " "
-                .. string.upper(machine.side)
-                .. " ("
-                .. #machine.itemIDs
-                .. " resource"
-                .. (#machine.itemIDs == 1 and "" or "s")
-                .. ")"
-            )
-
-            if machine.state then
-                term.setTextColor(colors.lime)
-                print("  RUNNING")
-            else
-                term.setTextColor(colors.red)
-                print("  STOPPED")
-            end
-
+            print(" " .. string.upper(machine.side) .. " (" .. #machine.itemIDs .. " resource" .. (#machine.itemIDs == 1 and "" or "s") .. ")")
+            term.setTextColor(machine.state and colors.lime or colors.red)
+            print(machine.state and "  RUNNING" or "  STOPPED")
             term.setTextColor(colors.white)
         end
     end
@@ -652,9 +551,7 @@ end
 local function configLoop()
     while true do
         sleep(configUpdateInterval)
-
         local success, configError = downloadTargets()
-
         if success then
             rebuildLocalMachines()
             reportStorage()
@@ -668,11 +565,9 @@ end
 
 local function networkLoop()
     while true do
-        local senderID, message, protocol = rednet.receive()
+        local _, message, protocol = rednet.receive()
 
-        if protocol == machineControlProtocol
-            and type(message) == "table" then
-
+        if protocol == machineControlProtocol and type(message) == "table" then
             if message.command == "auto_set" then
                 processAutoSet(message)
             elseif message.command == "discover" then
@@ -682,13 +577,11 @@ local function networkLoop()
         elseif protocol == storageControlProtocol
             and type(message) == "table"
             and message.command == "discover" then
-
             reportStorage()
 
         elseif protocol == configControlProtocol
             and type(message) == "table"
             and message.command == "force_targets_refresh" then
-
             forceTargetsRefresh()
         end
     end
