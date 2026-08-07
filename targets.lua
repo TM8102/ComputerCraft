@@ -129,6 +129,12 @@ return {
             stopAt = 100
         }
     },
+    ["justdirethings:polymorphic_fluid_source"] = {
+        displayName = "Polymorphic Fluid",
+        target = 512000,
+
+        machine = nil
+    },
     ["industrialforegoing:meat"] = {
         displayName = "Liquid Meat",
         target = 32000,
