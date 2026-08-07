@@ -17,7 +17,7 @@ return {
         target = 20000,
 
         machine = {
-            computerID = 12,
+            computerID = 0,
             machineKey = "iron",
             side = "top",
 
@@ -25,17 +25,12 @@ return {
             stopAt = 100
         }
     },
-
-    -- =====================================================
-    -- GOLD
-    -- =====================================================
-
     ["minecraft:gold_ingot"] = {
         displayName = "Gold",
         target = 12000,
 
         machine = {
-            computerID = 12,
+            computerID = 0,
             machineKey = "gold",
             side = "bottom",
 
@@ -43,17 +38,12 @@ return {
             stopAt = 100
         }
     },
-
-    -- =====================================================
-    -- REDSTONE
-    -- =====================================================
-
     ["minecraft:redstone"] = {
         displayName = "Redstone",
         target = 50000,
 
         machine = {
-            computerID = 13,
+            computerID = 0,
             machineKey = "redstone",
             side = "left",
 
@@ -61,15 +51,8 @@ return {
             stopAt = 100
         }
     },
-
-    -- =====================================================
-    -- PINK SLIME
-    --
-    -- Change the registry ID if your actual item ID differs.
-    -- =====================================================
-
     ["industrialforegoing:ether_gas"] = {
-        displayName = "Ether_Gas",
+        displayName = "Ether Gas",
         target = 512000,
 
         machine = {
@@ -81,13 +64,39 @@ return {
             stopAt = 100
         }
     },
-["allthemodium:soul_lava"] = {
+    ["allthemodium:soul_lava"] = {
         displayName = "Soul Lava",
         target = 512000,
 
         machine = {
             computerID = 16,
             machineKey = "soul_lava",
+            side = "top",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
+    ["industrialforegoing:pink_slime"] = {
+        displayName = "Pink Slime",
+        target = 512000,
+
+        machine = {
+            computerID = 12,
+            machineKey = "pink_slime",
+            side = "top",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
+    ["industrialforegoing:meat"] = {
+        displayName = "Liquid Meat",
+        target = 32000,
+
+        machine = {
+            computerID = 12,
+            machineKey = "meat",
             side = "top",
 
             startBelow = 50,
