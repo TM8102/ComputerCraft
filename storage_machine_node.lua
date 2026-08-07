@@ -1,7 +1,20 @@
+-- =========================================================
+-- STORAGE + MACHINE NODE
+--
+-- Scans inventories / fluid storage attached to this PC,
+-- reports configured resources to the Main display, and
+-- controls any machines assigned to this computer in
+-- targets.lua.
+--
+-- targets.lua is fetched from the GitHub Contents API.
+-- Every successful refresh completely replaces the old
+-- config and clears stale remembered resources.
+-- =========================================================
+
 local modemSide = "back"
 
-local targetsURL =
-    "https://raw.githubusercontent.com/TM8102/ComputerCraft/main/targets.lua"
+local githubAPIBase =
+    "https://api.github.com/repos/TM8102/ComputerCraft/contents/targets.lua?ref=main"
 
 local configFile = "targets.lua"
 local tempConfigFile = "targets_new.lua"
@@ -24,13 +37,21 @@ local configStatusProtocol = "config_status"
 
 local updateInterval = 2
 local configUpdateInterval = 300
-
 local computerID = os.getComputerID()
+
+-- =========================================================
+-- MODEM
+-- =========================================================
 
 if not peripheral.isPresent(modemSide) then
     error("No modem found on " .. modemSide)
 end
+
 rednet.open(modemSide)
+
+-- =========================================================
+-- STATE
+-- =========================================================
 
 local itemConfig = {}
 local knownItems = {}
@@ -40,6 +61,9 @@ local machineBySide = {}
 local machineByKey = {}
 local machineSides = {}
 
+local lastConfigStatus = "NONE"
+local lastConfigSHA = "UNKNOWN"
+
 local validSides = {
     top = true,
     bottom = true,
@@ -48,6 +72,10 @@ local validSides = {
     front = true,
     back = true
 }
+
+-- =========================================================
+-- CONFIG VALIDATION
+-- =========================================================
 
 local function validateConfig(config)
     if type(config) ~= "table" then
@@ -60,16 +88,21 @@ local function validateConfig(config)
         end
 
         if type(settings) ~= "table" then
-            return false, "Invalid config for " .. itemID
+            return false, "Invalid config for " .. tostring(itemID)
         end
 
         settings.target = tonumber(settings.target)
+
         if not settings.target or settings.target <= 0 then
-            return false, "Invalid target for " .. itemID
+            return false, "Invalid target for " .. tostring(itemID)
         end
 
         if settings.machine then
             local machine = settings.machine
+
+            if type(machine) ~= "table" then
+                return false, "Invalid machine config for " .. itemID
+            end
 
             machine.computerID = tonumber(machine.computerID)
             machine.startBelow = tonumber(machine.startBelow) or 50
@@ -93,26 +126,33 @@ local function validateConfig(config)
     return true
 end
 
-local function installDownloadedConfig(contents)
+-- =========================================================
+-- INSTALL CONFIG
+-- =========================================================
+
+local function installConfig(contents, sha)
     if fs.exists(tempConfigFile) then
         fs.delete(tempConfigFile)
     end
 
     local file = fs.open(tempConfigFile, "w")
+
     if not file then
-        return false, "COULD NOT WRITE TEMP CONFIG"
+        return false, "Could not write temp config"
     end
 
     file.write(contents)
     file.close()
 
     local ok, config = pcall(dofile, tempConfigFile)
+
     if not ok then
         fs.delete(tempConfigFile)
         return false, "CONFIG ERROR: " .. tostring(config)
     end
 
     local valid, validationError = validateConfig(config)
+
     if not valid then
         fs.delete(tempConfigFile)
         return false, validationError
@@ -123,66 +163,109 @@ local function installDownloadedConfig(contents)
     end
 
     fs.move(tempConfigFile, configFile)
-    itemConfig = config
 
-    for itemID in pairs(knownItems) do
-        if not itemConfig[itemID] then
-            knownItems[itemID] = nil
-        end
-    end
+    -- IMPORTANT:
+    -- Replace the complete in-memory config and completely
+    -- clear remembered storage items. This prevents deleted
+    -- targets from surviving after a refresh.
+    itemConfig = config
+    knownItems = {}
+
+    lastConfigStatus = "GITHUB API"
+    lastConfigSHA = tostring(sha or "UNKNOWN")
 
     return true
 end
 
+-- =========================================================
+-- DOWNLOAD TARGETS FROM GITHUB API
+-- =========================================================
+
 local function downloadTargets()
-    local response, httpError = http.get(targetsURL)
+    local cacheBuster = tostring(os.epoch("utc"))
+    local url = githubAPIBase .. "&cb=" .. cacheBuster
+
+    local response, httpError = http.get(
+        url,
+        {
+            ["User-Agent"] = "CC-Tweaked",
+            ["Accept"] = "application/vnd.github+json",
+            ["Cache-Control"] = "no-cache, no-store",
+            ["Pragma"] = "no-cache"
+        }
+    )
 
     if not response then
-        return false, "GITHUB DOWNLOAD FAILED: " .. tostring(httpError)
+        return false, "GITHUB API FAILED: " .. tostring(httpError)
     end
 
-    local contents = response.readAll()
+    local code = response.getResponseCode
+        and response.getResponseCode()
+        or 200
+
+    local body = response.readAll()
     response.close()
 
-    if not contents or contents == "" then
+    if code < 200 or code >= 300 then
+        return false, "GITHUB HTTP " .. tostring(code)
+    end
+
+    if not body or body == "" then
         return false, "EMPTY GITHUB RESPONSE"
     end
 
-    return installDownloadedConfig(contents)
+    local data = textutils.unserializeJSON(body)
+
+    if type(data) ~= "table" then
+        return false, "INVALID GITHUB JSON"
+    end
+
+    if type(data.content) ~= "string" then
+        return false, "GITHUB RESPONSE HAS NO CONTENT"
+    end
+
+    local encoded = string.gsub(data.content, "%s", "")
+    local decoded = textutils.decodeBase64(encoded)
+
+    if not decoded or decoded == "" then
+        return false, "BASE64 DECODE FAILED"
+    end
+
+    return installConfig(decoded, data.sha)
 end
+
+-- =========================================================
+-- LOCAL FALLBACK
+-- =========================================================
 
 local function loadLocalConfig()
     if not fs.exists(configFile) then
-        return false, "NO CONFIG"
+        return false, "NO LOCAL CONFIG"
     end
 
     local ok, config = pcall(dofile, configFile)
+
     if not ok then
         return false, tostring(config)
     end
 
     local valid, validationError = validateConfig(config)
+
     if not valid then
         return false, validationError
     end
 
     itemConfig = config
+    knownItems = {}
+    lastConfigStatus = "LOCAL CACHE"
+    lastConfigSHA = "LOCAL"
+
     return true
 end
 
-local downloaded, downloadError = downloadTargets()
-if not downloaded then
-    print("GitHub unavailable:")
-    print(tostring(downloadError))
-    print("Using local targets.lua...")
-
-    local loaded, loadError = loadLocalConfig()
-    if not loaded then
-        error("Could not load targets.lua: " .. tostring(loadError))
-    end
-else
-    print("targets.lua updated.")
-end
+-- =========================================================
+-- DISPLAY NAMES
+-- =========================================================
 
 local function makeDisplayName(itemID)
     local name = string.match(itemID, ":(.+)$") or itemID
@@ -195,13 +278,17 @@ local function getDisplayName(itemID)
     local settings = itemConfig[itemID]
 
     if settings
-        and settings.displayName
+        and type(settings.displayName) == "string"
         and settings.displayName ~= "" then
         return settings.displayName
     end
 
     return makeDisplayName(itemID)
 end
+
+-- =========================================================
+-- MACHINE CONFIG
+-- =========================================================
 
 local function rebuildLocalMachines()
     local oldStateBySide = {}
@@ -241,10 +328,8 @@ local function rebuildLocalMachines()
             end
 
             record.itemIDs[#record.itemIDs + 1] = itemID
-            record.machineKeys[#record.machineKeys + 1] =
-                machine.machineKey
-            record.targets[itemID] =
-                tonumber(settings.target) or 0
+            record.machineKeys[#record.machineKeys + 1] = machine.machineKey
+            record.targets[itemID] = tonumber(settings.target) or 0
 
             machineByKey[machine.machineKey] = record
         end
@@ -255,11 +340,13 @@ local function rebuildLocalMachines()
     end
 end
 
-rebuildLocalMachines()
+-- =========================================================
+-- STORAGE SCANNING
+-- =========================================================
 
-local function scanItemInventory(peripheralObject, amounts)
+local function scanItemInventory(p, amounts)
     local ok, items = pcall(function()
-        return peripheralObject.list()
+        return p.list()
     end)
 
     if not ok or type(items) ~= "table" then
@@ -279,9 +366,9 @@ local function scanItemInventory(peripheralObject, amounts)
     return true
 end
 
-local function scanFluidInventory(peripheralObject, amounts)
+local function scanFluidInventory(p, amounts)
     local ok, tanks = pcall(function()
-        return peripheralObject.tanks()
+        return p.tanks()
     end)
 
     if not ok or type(tanks) ~= "table" then
@@ -313,14 +400,13 @@ local function scanDirectStorage()
             and peripheral.isPresent(side) then
 
             local p = peripheral.wrap(side)
+
             if p then
                 local used = false
 
                 if type(p.list) == "function" then
                     used = true
-
-                    local ok, readError =
-                        scanItemInventory(p, amounts)
+                    local ok, readError = scanItemInventory(p, amounts)
 
                     if ok then
                         detectedSources[#detectedSources + 1] = {
@@ -337,9 +423,7 @@ local function scanDirectStorage()
 
                 if type(p.tanks) == "function" then
                     used = true
-
-                    local ok, readError =
-                        scanFluidInventory(p, amounts)
+                    local ok, readError = scanFluidInventory(p, amounts)
 
                     if ok then
                         detectedSources[#detectedSources + 1] = {
@@ -356,8 +440,7 @@ local function scanDirectStorage()
 
                 if not used then
                     errors[#errors + 1] =
-                        string.upper(side)
-                        .. " NOT STORAGE"
+                        string.upper(side) .. " NOT STORAGE"
                 end
             end
         end
@@ -366,10 +449,22 @@ local function scanDirectStorage()
     return amounts, detectedSources, errors
 end
 
+-- =========================================================
+-- REPORTING
+-- =========================================================
+
 local function updateKnownItems(amounts)
+    -- Only remember items that CURRENT targets.lua contains.
     for itemID in pairs(amounts) do
         if itemConfig[itemID] then
             knownItems[itemID] = true
+        end
+    end
+
+    -- Defensive cleanup in case config changed while running.
+    for itemID in pairs(knownItems) do
+        if not itemConfig[itemID] then
+            knownItems[itemID] = nil
         end
     end
 end
@@ -388,12 +483,14 @@ local function sendStorageManifest()
         enabledKeys = keys,
         role = "NODE",
         computerID = computerID,
+        configSHA = lastConfigSHA,
         timestamp = os.epoch("utc")
     }, storageStatusProtocol)
 end
 
 local function sendStorageUpdate(itemID, amount)
     local settings = itemConfig[itemID]
+
     if not settings then
         return
     end
@@ -407,8 +504,7 @@ local function sendStorageUpdate(itemID, amount)
         displayName = getDisplayName(itemID),
         amount = tonumber(amount) or 0,
         targetAmount = target,
-        percent =
-            target > 0
+        percent = target > 0
             and ((tonumber(amount) or 0) / target * 100)
             or 0,
         found = true,
@@ -416,6 +512,7 @@ local function sendStorageUpdate(itemID, amount)
         error = nil,
         role = "NODE",
         computerID = computerID,
+        configSHA = lastConfigSHA,
         timestamp = os.epoch("utc")
     }, storageStatusProtocol)
 end
@@ -425,8 +522,7 @@ local function sendMachineStatus(machine)
         rednet.broadcast({
             messageType = "resource_machine_status",
             itemID = itemID,
-            machineKey =
-                itemConfig[itemID]
+            machineKey = itemConfig[itemID]
                 and itemConfig[itemID].machine
                 and itemConfig[itemID].machine.machineKey
                 or nil,
@@ -435,6 +531,7 @@ local function sendMachineStatus(machine)
             target = machine.targets[itemID],
             role = "NODE",
             computerID = computerID,
+            configSHA = lastConfigSHA,
             timestamp = os.epoch("utc")
         }, machineStatusProtocol)
     end
@@ -447,21 +544,21 @@ local function sendAllMachineStatus()
 end
 
 local function reportStorage()
-    local amounts, detectedSources, errors =
-        scanDirectStorage()
+    local amounts, detectedSources, errors = scanDirectStorage()
 
     updateKnownItems(amounts)
     sendStorageManifest()
 
     for itemID in pairs(knownItems) do
-        sendStorageUpdate(
-            itemID,
-            amounts[itemID] or 0
-        )
+        sendStorageUpdate(itemID, amounts[itemID] or 0)
     end
 
     return amounts, detectedSources, errors
 end
+
+-- =========================================================
+-- MACHINE COMMANDS
+-- =========================================================
 
 local function processAutoSet(message)
     local machine = nil
@@ -492,13 +589,13 @@ local function processAutoSet(message)
     machine.state = message.state == true
     machine.lastCommand = os.epoch("utc")
 
-    redstone.setOutput(
-        machine.side,
-        machine.state
-    )
-
+    redstone.setOutput(machine.side, machine.state)
     sendMachineStatus(machine)
 end
+
+-- =========================================================
+-- TARGET REFRESH
+-- =========================================================
 
 local function sendRefreshStatus(success, errorMessage)
     rednet.broadcast({
@@ -507,6 +604,7 @@ local function sendRefreshStatus(success, errorMessage)
         error = errorMessage,
         role = "NODE",
         computerID = computerID,
+        configSHA = lastConfigSHA,
         timestamp = os.epoch("utc")
     }, configStatusProtocol)
 end
@@ -519,17 +617,30 @@ local function forceTargetsRefresh()
         return false
     end
 
+    -- Completely rebuild machine mapping and storage manifest
+    -- from the freshly downloaded config.
     rebuildLocalMachines()
+
+    -- knownItems was cleared by installConfig().
+    -- First send an empty manifest so Main immediately drops
+    -- anything this node used to report.
+    sendStorageManifest()
+
+    -- Then rescan and repopulate only current configured items.
     reportStorage()
     sendAllMachineStatus()
-    sendRefreshStatus(true, nil)
 
+    sendRefreshStatus(true, nil)
     return true
 end
 
+-- =========================================================
+-- LOCAL DISPLAY
+-- =========================================================
+
 local function drawLocalScreen()
-    local amounts, detectedSources, errors =
-        scanDirectStorage()
+    local amounts, detectedSources, errors = scanDirectStorage()
+    updateKnownItems(amounts)
 
     term.setBackgroundColor(colors.black)
     term.setTextColor(colors.white)
@@ -539,7 +650,8 @@ local function drawLocalScreen()
     print("STORAGE + MACHINE NODE")
     print("======================")
     print("Computer: " .. computerID)
-    print("Config: GitHub")
+    print("Config: " .. lastConfigStatus)
+    print("SHA: " .. string.sub(lastConfigSHA, 1, 12))
     print("")
 
     print("STORAGE:")
@@ -583,9 +695,11 @@ local function drawLocalScreen()
     print("RESOURCES:")
 
     local sortedKnown = {}
+
     for itemID in pairs(knownItems) do
         sortedKnown[#sortedKnown + 1] = itemID
     end
+
     table.sort(sortedKnown)
 
     if #sortedKnown == 0 then
@@ -593,14 +707,7 @@ local function drawLocalScreen()
     else
         for _, itemID in ipairs(sortedKnown) do
             print(" " .. getDisplayName(itemID))
-            print(
-                "  "
-                .. tostring(
-                    math.floor(
-                        amounts[itemID] or 0
-                    )
-                )
-            )
+            print("  " .. tostring(math.floor(amounts[itemID] or 0)))
         end
     end
 
@@ -634,6 +741,32 @@ local function drawLocalScreen()
     end
 end
 
+-- =========================================================
+-- STARTUP CONFIG
+-- =========================================================
+
+local downloaded, downloadError = downloadTargets()
+
+if not downloaded then
+    print("GitHub API unavailable:")
+    print(tostring(downloadError))
+    print("Using local targets.lua...")
+
+    local loaded, loadError = loadLocalConfig()
+
+    if not loaded then
+        error("Could not load targets.lua: " .. tostring(loadError))
+    end
+else
+    print("targets.lua updated from GitHub API.")
+end
+
+rebuildLocalMachines()
+
+-- =========================================================
+-- LOOPS
+-- =========================================================
+
 local function reportingLoop()
     while true do
         reportStorage()
@@ -657,6 +790,7 @@ local function configLoop()
 
         if success then
             rebuildLocalMachines()
+            sendStorageManifest()
             reportStorage()
             sendAllMachineStatus()
         else
@@ -671,19 +805,23 @@ local function networkLoop()
         local senderID, message, protocol = rednet.receive()
 
         if protocol == machineControlProtocol
-            and type(message) == "table" then
+            and type(message) == "table"
+            and message.command == "auto_set" then
 
-            if message.command == "auto_set" then
-                processAutoSet(message)
-            elseif message.command == "discover" then
-                sendAllMachineStatus()
-            end
+            processAutoSet(message)
 
         elseif protocol == storageControlProtocol
             and type(message) == "table"
             and message.command == "discover" then
 
             reportStorage()
+            sendAllMachineStatus()
+
+        elseif protocol == machineControlProtocol
+            and type(message) == "table"
+            and message.command == "discover" then
+
+            sendAllMachineStatus()
 
         elseif protocol == configControlProtocol
             and type(message) == "table"
