@@ -128,11 +128,5 @@ return {
         target = 65500,
 
         machine = nil
-    },
-    ["mincraft:dirt"] = {
-        displayName = "Test",
-        target = 500,
-
-        machine = nil
     }
 }
