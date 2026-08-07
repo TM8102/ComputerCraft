@@ -90,6 +90,19 @@ return {
             stopAt = 100
         }
     },
+    ["mysticalagricalture:dye_essence"] = {
+        displayName = "Dye Essence",
+        target = 65500,
+
+        machine = {
+            computerID = ,
+            machineKey = "dye_essence",
+            side = "back",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
     ["industrialforegoing:meat"] = {
         displayName = "Liquid Meat",
         target = 32000,
