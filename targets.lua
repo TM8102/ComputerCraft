@@ -91,7 +91,7 @@ return {
         }
     },
     ["mysticalagradditions:insanium_essence"] = {
-        displayName = "Insanium Essence",
+        displayName = "Insanium",
         target = 65500,
 
         machine = {
