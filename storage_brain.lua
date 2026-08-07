@@ -93,7 +93,9 @@ local validSides = {
     top = true,
     bottom = false,
     left = false,
-    right = false
+    right = false,
+    front = false,
+    back = false
 }
 
 local function validateConfig(
