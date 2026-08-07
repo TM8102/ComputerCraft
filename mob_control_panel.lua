@@ -1,7 +1,8 @@
 -- =========================================================
 -- MOB CONTROL PANEL
--- Reliable maintenance lockout, refresh/debug popup,
--- storage-style 6-line cards, N/A filtering, animated borders.
+-- Single-row controls, storage-matched card spacing,
+-- maintenance lockout, refresh/debug, N/A filtering,
+-- animated active borders, and Pink Slime automation.
 -- =========================================================
 
 local monitorSide = "right"
@@ -358,47 +359,65 @@ local function rememberNode(computerID,role)
     }
 end
 
+-- =========================================================
+-- LAYOUT
+-- Matches Main Storage panel vertical spacing exactly:
+-- header rows 1-5, accent row 6, grid region starts at 7,
+-- footer occupies height-1 through height.
+-- =========================================================
 local function calculateLayout()
     local width,height=monitor.getSize()
+
+    -- Six controls, all on one row.
     local margin=2
-    local gap=1
-    local buttonWidth=math.floor((width-margin*2-gap*2)/3)
+    local buttonGap=1
+    local buttonCount=6
+    local buttonWidth=math.floor(
+        (width-(margin*2)-(buttonGap*(buttonCount-1))) / buttonCount
+    )
 
-    if buttonWidth<14 then error("Monitor too narrow") end
+    if buttonWidth<10 then
+        error("Monitor too narrow for single-row controls")
+    end
 
-    local x1=margin
-    local x2=x1+buttonWidth-1
-    local x3=x2+gap+1
-    local x4=x3+buttonWidth-1
-    local x5=x4+gap+1
-    local x6=width-margin
+    local ordered={
+        buttons.masterOn,
+        buttons.masterOff,
+        buttons.fans,
+        buttons.maintenance,
+        buttons.refresh,
+        buttons.reboot
+    }
 
-    buttons.masterOn={x1=x1,x2=x2,y1=2,y2=4}
-    buttons.masterOff={x1=x3,x2=x4,y1=2,y2=4}
-    buttons.fans={x1=x5,x2=x6,y1=2,y2=4}
+    local x=margin
+    for _,button in ipairs(ordered) do
+        button.x1=x
+        button.x2=x+buttonWidth-1
+        button.y1=2
+        button.y2=4
+        x=button.x2+buttonGap+1
+    end
 
-    -- Y=5 is the requested one-line gap.
-    buttons.maintenance={x1=x1,x2=x2,y1=6,y2=8}
-    buttons.refresh={x1=x3,x2=x4,y1=6,y2=8}
-    buttons.reboot={x1=x5,x2=x6,y1=6,y2=8}
-
+    -- Same card geometry and vertical grid region as Main Storage.
     local columns=5
     local rows=8
     local cardHeight=6
     local horizontalGap=1
     local verticalGap=1
-    local topY=11
+    local topY=7
     local bottomY=height-2
     local availableWidth=width-2
     local availableHeight=bottomY-topY+1
 
-    local cardWidth=math.floor((availableWidth-horizontalGap*(columns-1))/columns)
+    local cardWidth=math.floor(
+        (availableWidth-horizontalGap*(columns-1))/columns
+    )
     if cardWidth<10 then error("Monitor too narrow for cards") end
 
     local gridWidth=columns*cardWidth+horizontalGap*(columns-1)
     local gridHeight=rows*cardHeight+verticalGap*(rows-1)
     if gridHeight>availableHeight then
-        error("Monitor too short for 40 six-line cards")
+        error("Monitor too short for 40 six-line cards with row gaps")
     end
 
     local startX=math.floor((width-gridWidth)/2)+1
@@ -424,55 +443,54 @@ end
 
 local function drawFanButton()
     if maintenanceMode then
-        drawButton(buttons.fans,"FANS: OFF",theme.fanOff)
+        drawButton(buttons.fans,"FANS OFF",theme.fanOff)
     elseif fanShutdownRemaining>0 then
-        drawButton(buttons.fans,"FANS: "..fanShutdownRemaining.."s",theme.fanOn)
+        drawButton(buttons.fans,"FANS "..fanShutdownRemaining.."s",theme.fanOn)
     elseif fansState then
-        drawButton(buttons.fans,"FANS: ON",theme.fanOn)
+        drawButton(buttons.fans,"FANS ON",theme.fanOn)
     else
-        drawButton(buttons.fans,"FANS: OFF",theme.fanOff)
+        drawButton(buttons.fans,"FANS OFF",theme.fanOff)
     end
 end
 
 local function drawMaintenanceButton()
     drawButton(
         buttons.maintenance,
-        maintenanceMode and "MAINTENANCE: ON" or "MAINTENANCE: OFF",
+        maintenanceMode and "MAINT ON" or "MAINT OFF",
         maintenanceMode and theme.maintenanceOn or theme.maintenanceOff
     )
 end
 
 local function drawHeader()
     local width=monitor.getSize()
-    fill(1,1,width,10,theme.header)
+
+    -- Same header/accent height as Main Storage.
+    fill(1,1,width,5,theme.header)
 
     local title="SPAWNER CONTROL"
     if maintenanceMode then
-        title=title.."  |  MAINTENANCE LOCKOUT"
+        title=title.." | MAINTENANCE"
     elseif pinkSlimeAutomationActive then
-        title=title.."  |  PINK SLIME AUTO"
+        title=title.." | PINK SLIME AUTO"
     end
-
     center(1,width,1,title,theme.headerText,theme.header)
 
     drawButton(
         buttons.masterOn,
-        pinkSlimeAutomationActive and not maintenanceMode
-            and "AUTO / MASTER ON"
-            or "MASTER ON",
+        pinkSlimeAutomationActive and not maintenanceMode and "AUTO ON" or "MASTER ON",
         maintenanceMode and colors.gray or theme.masterOn
     )
-
     drawButton(buttons.masterOff,"MASTER OFF",theme.masterOff)
     drawFanButton()
     drawMaintenanceButton()
     drawButton(
         buttons.refresh,
-        refresh.running and "REFRESHING..." or "REFRESH SPAWNERS",
+        refresh.running and "REFRESH..." or "REFRESH",
         refresh.running and theme.refreshPressed or theme.refresh
     )
-    drawButton(buttons.reboot,"REBOOT PANEL",theme.reboot)
-    fill(1,10,width,10,theme.accent)
+    drawButton(buttons.reboot,"REBOOT",theme.reboot)
+
+    fill(1,6,width,6,theme.accent)
 end
 
 local function drawActiveBorder(spawner)
@@ -576,7 +594,7 @@ local function drawFooter()
         .."   OFFLINE "..offline
 
     if maintenanceMode then
-        left="MAINTENANCE LOCKOUT   |   "..left
+        left="MAINTENANCE LOCKOUT | "..left
     end
 
     writeAt(2,height,shorten(left,width-2),theme.footerText,theme.footer)
@@ -634,12 +652,10 @@ local function drawRefreshPopup()
     else
         summary=successCount().." UPDATED   "..failureCount().." FAILED"
     end
-
     center(x1+2,x2-2,y1+3,summary,colors.white,theme.popup)
 
     local ids={}
     local seen={}
-
     for id in pairs(refresh.expected) do
         ids[#ids+1]=id
         seen[id]=true
@@ -660,7 +676,6 @@ local function drawRefreshPopup()
             result and (result.success and theme.success or theme.failure) or theme.pending,
             theme.popup
         )
-
         writeAt(x1+5,row,"NODE "..id,colors.white,theme.popup)
         writeAt(
             x2-10,row,
@@ -828,7 +843,6 @@ local function enterMaintenance()
     markAllSpawnersOff()
     fansState=false
 
-    -- Change local state and redraw BEFORE network traffic.
     drawScreen()
 
     rednet.broadcast({command="all_off"},controlProtocol)
@@ -848,10 +862,7 @@ local function exitMaintenance()
     markAllSpawnersOff()
     fansState=false
 
-    -- Prevent queued duplicate touches from turning maintenance back on.
     maintenanceRearmUntil=now()+maintenanceRearmMs
-
-    -- Again, redraw first so one tap visibly exits immediately.
     drawScreen()
 
     sendFansState()
@@ -980,8 +991,6 @@ local function processSpawnerStatus(senderID,message)
     spawner.lastUpdate=now()
     spawner.mobsPerSecond=tonumber(message.mobsPerSecond or message.spawnRate)
 
-    -- Remote status never changes the panel's local maintenance state.
-    -- It only causes the desired state to be re-sent if the node disagrees.
     if message.maintenance~=maintenanceMode then
         sendMaintenanceState(maintenanceMode,senderID)
     end
@@ -1111,7 +1120,7 @@ local function updateOffline()
 end
 
 local function rebootComputer()
-    drawButton(buttons.reboot,"REBOOTING...",theme.rebootPressed)
+    drawButton(buttons.reboot,"REBOOTING",theme.rebootPressed)
     sleep(0.3)
     monitor.setBackgroundColor(colors.black)
     monitor.clear()
@@ -1151,8 +1160,6 @@ while true do
         local timestamp=now()
 
         if inside(x,y,buttons.maintenance) then
-            -- Explicit ON/OFF behavior instead of a blind toggle.
-            -- OFF is always allowed when maintenance is active.
             if timestamp-lastMaintenanceTouch>=maintenanceTouchGuardMs then
                 lastMaintenanceTouch=timestamp
 
