@@ -118,7 +118,7 @@ return {
     },
     ["justdirethings:time_fluid_source"] = {
         displayName = "Time Fluid",
-        target = 512000,
+        target = 2097152000,
 
         machine = {
             computerID = 200,
