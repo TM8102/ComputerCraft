@@ -128,18 +128,5 @@ return {
         target = 65500,
 
         machine = nil
-    },
-    -- =====================================================
-    -- STORAGE ONLY
-    --
-    -- This appears on the Main Storage screen but does NOT
-    -- automatically control any machine.
-    -- =====================================================
-
-    ["minecraft:dirt"] = {
-        displayName = "Dirt",
-        target = 10000,
-
-        machine = nil
     }
 }
