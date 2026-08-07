@@ -23,16 +23,13 @@ local updateInterval = 4
 local configUpdateInterval = 300
 local configSource = "NONE"
 local maintenanceMode = false
+local lastMaintenanceTimestamp = 0
 
 local sideOrder = {"front", "back", "left", "right", "top", "bottom"}
 local validSides = {
     top=true, bottom=true, left=true,
     right=true, front=true, back=true
 }
-
--- =========================================================
--- MODEM AUTO-DETECT
--- =========================================================
 
 for _, side in ipairs({"top","bottom","left","right","front","back"}) do
     if peripheral.isPresent(side)
@@ -44,10 +41,6 @@ end
 
 if not modemSide then error("No modem found") end
 rednet.open(modemSide)
-
--- =========================================================
--- HELPERS
--- =========================================================
 
 local function trim(value)
     value = tostring(value or "")
@@ -82,11 +75,6 @@ local function makeKey(side)
     return "side_" .. tostring(side)
 end
 
--- New simple format:
--- [26] = {
---     front = "Spider",
---     back  = "N/A", -- disabled
--- }
 local function simpleProfileToList(profile)
     local list = {}
 
@@ -124,7 +112,6 @@ local function normalizeProfile(profile)
         return nil, "Spawner profile must be a table"
     end
 
-    -- Backwards compatibility with older verbose config.
     if type(profile.spawners) == "table" then
         local result = {}
 
@@ -252,7 +239,6 @@ local function applyConfig(config, source)
         spawner.state = not maintenanceMode
             and oldStates[spawner.key] == true
             or false
-
         redstone.setOutput(spawner.outputSide, spawner.state)
     end
 
@@ -329,10 +315,6 @@ local function loadLocalConfig()
     return applyConfig(config, "LOCAL CACHE")
 end
 
--- =========================================================
--- CONTROL
--- =========================================================
-
 local function findSpawner(key)
     for _, spawner in ipairs(spawners) do
         if spawner.key == key then return spawner end
@@ -370,10 +352,6 @@ local function turnEverythingOn()
     return true
 end
 
--- =========================================================
--- STATUS
--- =========================================================
-
 local function sendManifest()
     local keys = {}
     for _, spawner in ipairs(spawners) do
@@ -407,10 +385,7 @@ local function sendSpawnerStatus(spawner)
 end
 
 local function sendAllStatuses()
-    -- The manifest is important: if a side changed to N/A,
-    -- it is absent here and the control panel deletes its old card.
     sendManifest()
-
     for _, spawner in ipairs(spawners) do
         sendSpawnerStatus(spawner)
     end
@@ -428,10 +403,6 @@ local function sendRefreshStatus(success, errorMessage)
         timestamp = os.epoch("utc")
     }, configStatusProtocol)
 end
-
--- =========================================================
--- LOCAL DISPLAY
--- =========================================================
 
 local function drawScreen()
     term.setBackgroundColor(colors.black)
@@ -474,10 +445,6 @@ local function drawScreen()
     end
 end
 
--- =========================================================
--- STARTUP
--- =========================================================
-
 local downloaded, downloadError = downloadConfig()
 if not downloaded then
     print("GitHub config failed: " .. tostring(downloadError))
@@ -492,9 +459,28 @@ turnEverythingOff()
 sendAllStatuses()
 drawScreen()
 
--- =========================================================
--- LOOPS
--- =========================================================
+local function applyMaintenanceCommand(message)
+    local timestamp = tonumber(message.timestamp) or 0
+
+    -- The control panel sends timestamped maintenance commands.
+    -- Ignore older packets which arrive after a newer command. This is
+    -- what prevents a delayed MAINTENANCE ON packet from re-locking a
+    -- node after MAINTENANCE OFF has already been sent.
+    if timestamp < lastMaintenanceTimestamp then
+        return false
+    end
+
+    lastMaintenanceTimestamp = timestamp
+    maintenanceMode = message.state == true
+
+    if maintenanceMode then
+        turnEverythingOff()
+    end
+
+    sendAllStatuses()
+    drawScreen()
+    return true
+end
 
 local function networkLoop()
     while true do
@@ -506,10 +492,7 @@ local function networkLoop()
                     sendAllStatuses()
 
                 elseif message.command == "maintenance" then
-                    maintenanceMode = message.state == true
-                    if maintenanceMode then turnEverythingOff() end
-                    sendAllStatuses()
-                    drawScreen()
+                    applyMaintenanceCommand(message)
 
                 elseif message.command == "all_off" then
                     turnEverythingOff()
