@@ -1,98 +1,157 @@
 -- =========================================================
--- TIME WAND AUTO CHARGER
--- =========================================================
+-- TIME WAND CONTROLLER
 --
 -- EMPTY wand:
--- Advanced Clicker -> Mekanism Tank
+-- Advanced Clicker -> Tank slot 2
 --
 -- FULL wand:
--- Mekanism Tank -> Advanced Clicker
+-- Tank -> Advanced Clicker slot 1
 --
 -- =========================================================
 
-local clickerSide = "left"
-local tankSide = "right"
+local clickerSide =
+    "left"
+
+local tankSide =
+    "right"
+
+local clickerWandSlot =
+    1
+
+local tankWandSlot =
+    2
 
 local wandID =
     "justdirethings:time_wand"
 
+-- =========================================================
+-- NBT HASHES
+-- =========================================================
+
 local emptyHash =
-    "77597cd4301458d6e7f0e1b005ff6d68"
+    "77597cdd30145dd6e7f0c1d005ff6dc8"
 
 local fullHash =
     "866815d750ffc888754359b0ed011353"
 
-local checkInterval = 0.25
+-- =========================================================
+-- TIMING
+-- =========================================================
+
+local checkInterval =
+    0.25
 
 -- =========================================================
 -- PERIPHERALS
 -- =========================================================
 
-if not peripheral.isPresent(clickerSide) then
+if not peripheral.isPresent(
+    clickerSide
+) then
+
     error(
         "Advanced Clicker not found on "
         .. clickerSide
     )
 end
 
-if not peripheral.isPresent(tankSide) then
+if not peripheral.isPresent(
+    tankSide
+) then
+
     error(
-        "Mekanism Tank not found on "
+        "Tank not found on "
         .. tankSide
     )
 end
 
 local clicker =
-    peripheral.wrap(clickerSide)
+    peripheral.wrap(
+        clickerSide
+    )
 
 local tank =
-    peripheral.wrap(tankSide)
+    peripheral.wrap(
+        tankSide
+    )
 
 local clickerName =
-    peripheral.getName(clicker)
+    peripheral.getName(
+        clicker
+    )
 
 local tankName =
-    peripheral.getName(tank)
+    peripheral.getName(
+        tank
+    )
 
-if type(clicker.list) ~= "function" then
+if type(clicker.list)
+    ~= "function" then
+
     error(
-        "Clicker does not expose inventory"
+        "Clicker does not expose item inventory"
     )
 end
 
-if type(tank.list) ~= "function" then
+if type(tank.list)
+    ~= "function" then
+
     error(
         "Tank does not expose item inventory"
     )
 end
 
-if type(clicker.getItemDetail) ~= "function" then
+if type(clicker.getItemDetail)
+    ~= "function" then
+
     error(
         "Clicker does not support getItemDetail()"
     )
 end
 
-if type(tank.getItemDetail) ~= "function" then
+if type(tank.getItemDetail)
+    ~= "function" then
+
     error(
         "Tank does not support getItemDetail()"
     )
 end
 
+if type(clicker.pushItems)
+    ~= "function" then
+
+    error(
+        "Clicker does not support pushItems()"
+    )
+end
+
+if type(tank.pushItems)
+    ~= "function" then
+
+    error(
+        "Tank does not support pushItems()"
+    )
+end
+
 -- =========================================================
--- FIND WAND
+-- FIND TIME WAND
 -- =========================================================
 
-local function findWand(inv)
+local function findWand(
+    inventory
+)
     local items =
-        inv.list()
+        inventory.list()
 
-    for slot, item
+    for slot,
+        item
         in pairs(items) do
 
-        if item.name == wandID then
+        if item.name
+            == wandID then
 
             local detail =
-                inv.getItemDetail(
+                inventory.getItemDetail(
                     slot
                 )
 
@@ -106,26 +165,21 @@ local function findWand(inv)
 end
 
 -- =========================================================
--- MOVE ITEM
+-- MOVE TIME WAND
 -- =========================================================
 
 local function moveWand(
     source,
     destinationName,
-    slot
+    sourceSlot,
+    destinationSlot
 )
-    if type(source.pushItems)
-        ~= "function" then
-
-        return false,
-            "pushItems unavailable"
-    end
-
     local moved =
         source.pushItems(
             destinationName,
-            slot,
-            1
+            sourceSlot,
+            1,
+            destinationSlot
         )
 
     return moved == 1,
@@ -136,7 +190,7 @@ end
 -- DISPLAY
 -- =========================================================
 
-local function draw(
+local function drawScreen(
     location,
     status,
     hash
@@ -169,23 +223,31 @@ local function draw(
     print(
         "Clicker: "
         .. clickerSide
+        .. " slot "
+        .. clickerWandSlot
     )
 
     print(
         "Tank:    "
         .. tankSide
+        .. " slot "
+        .. tankWandSlot
     )
 
     print("")
 
     print(
         "Wand: "
-        .. tostring(location)
+        .. tostring(
+            location
+        )
     )
 
     print(
         "Status: "
-        .. tostring(status)
+        .. tostring(
+            status
+        )
     )
 
     if hash then
@@ -193,7 +255,9 @@ local function draw(
         print("NBT:")
 
         print(
-            tostring(hash)
+            tostring(
+                hash
+            )
         )
     end
 end
@@ -206,11 +270,15 @@ while true do
 
     local clickerSlot,
         clickerDetail =
-        findWand(clicker)
+        findWand(
+            clicker
+        )
 
     local tankSlot,
         tankDetail =
-        findWand(tank)
+        findWand(
+            tank
+        )
 
     -- =====================================================
     -- WAND IS IN CLICKER
@@ -222,43 +290,72 @@ while true do
         local hash =
             clickerDetail.nbt
 
-        if hash == emptyHash then
+        -- =================================================
+        -- EMPTY
+        -- =================================================
 
-            draw(
+        if hash
+            == emptyHash then
+
+            drawScreen(
                 "CLICKER",
                 "EMPTY - MOVING TO TANK",
                 hash
             )
 
             local success,
-                result =
+                moved =
                 moveWand(
                     clicker,
                     tankName,
-                    clickerSlot
+                    clickerSlot,
+                    tankWandSlot
                 )
 
-            if not success then
+            if success then
 
-                draw(
+                drawScreen(
+                    "TANK",
+                    "MOVED - CHARGING",
+                    hash
+                )
+
+                sleep(
+                    0.5
+                )
+
+            else
+
+                drawScreen(
                     "CLICKER",
                     "MOVE TO TANK FAILED: "
-                    .. tostring(result),
+                    .. tostring(
+                        moved
+                    ),
                     hash
                 )
             end
 
-        elseif hash == fullHash then
+        -- =================================================
+        -- FULL
+        -- =================================================
 
-            draw(
+        elseif hash
+            == fullHash then
+
+            drawScreen(
                 "CLICKER",
-                "FULL - RUNNING",
+                "FULL - IN USE",
                 hash
             )
 
+        -- =================================================
+        -- PARTIALLY CHARGED
+        -- =================================================
+
         else
 
-            draw(
+            drawScreen(
                 "CLICKER",
                 "IN USE",
                 hash
@@ -275,43 +372,72 @@ while true do
         local hash =
             tankDetail.nbt
 
-        if hash == fullHash then
+        -- =================================================
+        -- FULL
+        -- =================================================
 
-            draw(
+        if hash
+            == fullHash then
+
+            drawScreen(
                 "TANK",
                 "FULL - MOVING TO CLICKER",
                 hash
             )
 
             local success,
-                result =
+                moved =
                 moveWand(
                     tank,
                     clickerName,
-                    tankSlot
+                    tankSlot,
+                    clickerWandSlot
                 )
 
-            if not success then
+            if success then
 
-                draw(
+                drawScreen(
+                    "CLICKER",
+                    "MOVED - READY",
+                    hash
+                )
+
+                sleep(
+                    0.5
+                )
+
+            else
+
+                drawScreen(
                     "TANK",
                     "MOVE TO CLICKER FAILED: "
-                    .. tostring(result),
+                    .. tostring(
+                        moved
+                    ),
                     hash
                 )
             end
 
-        elseif hash == emptyHash then
+        -- =================================================
+        -- EMPTY
+        -- =================================================
 
-            draw(
+        elseif hash
+            == emptyHash then
+
+            drawScreen(
                 "TANK",
                 "CHARGING - EMPTY",
                 hash
             )
 
+        -- =================================================
+        -- CHARGING
+        -- =================================================
+
         else
 
-            draw(
+            drawScreen(
                 "TANK",
                 "CHARGING",
                 hash
@@ -319,14 +445,14 @@ while true do
         end
 
     -- =====================================================
-    -- NO WAND
+    -- WAND NOT FOUND
     -- =====================================================
 
     else
 
-        draw(
-            "UNKNOWN",
-            "TIME WAND NOT FOUND",
+        drawScreen(
+            "NOT FOUND",
+            "WAITING FOR TIME WAND",
             nil
         )
     end
