@@ -95,7 +95,7 @@ return {
         target = 65500,
 
         machine = {
-            computerID = ,
+            computerID = 222,
             machineKey = "dye_essence",
             side = "back",
 
