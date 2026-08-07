@@ -104,7 +104,7 @@ return {
         }
     },
     ["minecraft:diamond"] = {
-        displayName = "Diamon",
+        displayName = "Diamond",
         target = 65500,
 
         machine = {
