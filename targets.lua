@@ -12,45 +12,6 @@ return {
     -- 20,000 -> machine OFF
     -- =====================================================
 
-    ["minecraft:iron_ingot"] = {
-        displayName = "Iron",
-        target = 20000,
-
-        machine = {
-            computerID = 200,
-            machineKey = "iron",
-            side = "top",
-
-            startBelow = 50,
-            stopAt = 100
-        }
-    },
-    ["minecraft:gold_ingot"] = {
-        displayName = "Gold",
-        target = 12000,
-
-        machine = {
-            computerID = 200,
-            machineKey = "gold",
-            side = "bottom",
-
-            startBelow = 50,
-            stopAt = 100
-        }
-    },
-    ["minecraft:redstone"] = {
-        displayName = "Redstone",
-        target = 50000,
-
-        machine = {
-            computerID = 200,
-            machineKey = "redstone",
-            side = "left",
-
-            startBelow = 50,
-            stopAt = 100
-        }
-    },
     ["industrialforegoing:ether_gas"] = {
         displayName = "Ether Gas",
         target = 512000,
@@ -84,19 +45,6 @@ return {
         machine = {
             computerID = 12,
             machineKey = "pink_slime",
-            side = "top",
-
-            startBelow = 50,
-            stopAt = 100
-        }
-    },
-    ["minecraft:diamond"] = {
-        displayName = "Diamond",
-        target = 512000,
-
-        machine = {
-            computerID = 202,
-            machineKey = "diamond",
             side = "top",
 
             startBelow = 50,
