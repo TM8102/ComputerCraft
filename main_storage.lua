@@ -1,6 +1,10 @@
 local monitorSide = "right"
 local modemSide = "back"
 
+-- =========================================================
+-- NETWORK
+-- =========================================================
+
 local storageControlProtocol =
     "inventory_control"
 
@@ -12,6 +16,13 @@ local machineControlProtocol =
 
 local machineStatusProtocol =
     "resource_machine_status"
+
+-- NEW
+local configControlProtocol =
+    "config_control"
+
+local configStatusProtocol =
+    "config_status"
 
 -- =========================================================
 -- DISPLAY
@@ -28,8 +39,10 @@ local sourceRemoveSeconds = 60
 
 local discoveryInterval = 5
 
--- Main screen redraw frequency.
 local renderInterval = 0.20
+
+-- How long the refresh-status message remains in header.
+local refreshMessageSeconds = 8
 
 -- =========================================================
 -- ANIMATION
@@ -37,7 +50,6 @@ local renderInterval = 0.20
 
 local animationSpeed = 0.12
 local flashInterval = 0.48
-
 local chaseLength = 6
 
 local chaseFrame = 0
@@ -46,14 +58,10 @@ local flashState = false
 local flashElapsed = 0
 
 -- =========================================================
--- DIRTY FLAGS
---
--- Network packets DO NOT redraw the screen directly.
--- They only update data and set screenDirty.
+-- DIRTY RENDER
 -- =========================================================
 
 local screenDirty = true
-local footerDirty = true
 
 -- =========================================================
 -- MONITOR
@@ -133,41 +141,33 @@ local theme = {
     amountText =
         colors.white,
 
-    -- =====================================================
-    -- STORAGE COLORS
-    -- =====================================================
-
-    -- >= 100%
+    -- Storage levels
     full =
         colors.lime,
 
-    -- 75 - 99.99%
     good =
         colors.lightBlue,
 
-    -- 50 - 74.99%
     warning =
         colors.orange,
 
-    -- 25 - 49.99%
     low =
         colors.red,
 
-    -- <25%
     criticalRed =
         colors.red,
 
     criticalBlack =
         colors.black,
 
-    -- Offline / errors
+    -- Errors
     errorRed =
         colors.red,
 
     errorOrange =
         colors.orange,
 
-    -- Machine running chase
+    -- Machine chase
     machineChase =
         colors.lime,
 
@@ -187,19 +187,28 @@ local theme = {
     progressLow =
         colors.red,
 
-    -- Empty card
+    -- Empty cards
     emptyBorder =
         colors.gray,
 
     placeholderText =
         colors.gray,
 
-    -- Reboot
+    -- Buttons
     rebootButton =
         colors.blue,
 
     rebootPressed =
         colors.lightBlue,
+
+    refreshButton =
+        colors.green,
+
+    refreshPressed =
+        colors.lime,
+
+    refreshFailure =
+        colors.red,
 
     -- Footer
     footer =
@@ -211,20 +220,6 @@ local theme = {
 
 -- =========================================================
 -- DATA
---
--- Multiple computers can report the SAME item.
---
--- Example:
---
--- Functional Storage computer:
---   Ether Gas = 100000
---
--- Remote Drawer computer:
---   Ether Gas = 50000
---
--- Main displays:
---   Ether Gas = 150000
---
 -- =========================================================
 
 local storageSources = {}
@@ -239,6 +234,31 @@ local layoutSlots = {}
 
 local rebootButton = {}
 
+local refreshButton = {}
+
+-- =========================================================
+-- REFRESH STATUS
+-- =========================================================
+
+local refreshStatus = {
+    active = false,
+
+    started =
+        0,
+
+    successCount =
+        0,
+
+    failureCount =
+        0,
+
+    lastMessage =
+        "",
+
+    lastComputer =
+        nil
+}
+
 -- =========================================================
 -- DRAW HELPERS
 -- =========================================================
@@ -250,7 +270,6 @@ local function fill(
     y2,
     color
 )
-
     if x2 < x1
         or y2 < y1 then
 
@@ -262,7 +281,6 @@ local function fill(
     )
 
     for y = y1, y2 do
-
         monitor.setCursorPos(
             x1,
             y
@@ -284,7 +302,6 @@ local function writeAt(
     fg,
     bg
 )
-
     monitor.setCursorPos(
         x,
         y
@@ -309,7 +326,6 @@ local function shortenText(
     text,
     maxLength
 )
-
     text =
         tostring(
             text or ""
@@ -324,7 +340,6 @@ local function shortenText(
     end
 
     if maxLength <= 3 then
-
         return string.sub(
             text,
             1,
@@ -347,7 +362,6 @@ local function centerInside(
     fg,
     bg
 )
-
     local width =
         x2 - x1 + 1
 
@@ -382,7 +396,6 @@ local function drawBorder(
     y2,
     color
 )
-
     fill(
         x1,
         y1,
@@ -421,7 +434,6 @@ local function drawPixel(
     y,
     color
 )
-
     monitor.setCursorPos(
         x,
         y
@@ -442,7 +454,6 @@ local function isInside(
     x2,
     y2
 )
-
     return x >= x1
         and x <= x2
         and y >= y1
@@ -459,12 +470,9 @@ local function getBorderPoints(
     x2,
     y2
 )
-
     local points = {}
 
-    -- Top
     for x = x1, x2 do
-
         points[
             #points + 1
         ] = {
@@ -473,7 +481,6 @@ local function getBorderPoints(
         }
     end
 
-    -- Right
     for y = y1 + 1,
         y2 - 1 do
 
@@ -485,7 +492,6 @@ local function getBorderPoints(
         }
     end
 
-    -- Bottom
     for x = x2,
         x1,
         -1 do
@@ -498,7 +504,6 @@ local function getBorderPoints(
         }
     end
 
-    -- Left
     for y = y2 - 1,
         y1 + 1,
         -1 do
@@ -515,28 +520,22 @@ local function getBorderPoints(
 end
 
 -- =========================================================
--- NUMBER FORMATTING
+-- NUMBER FORMAT
 -- =========================================================
 
 local function commaNumber(
     number
 )
-
     number =
         math.floor(
-            tonumber(
-                number
-            )
+            tonumber(number)
             or 0
         )
 
     local text =
-        tostring(
-            number
-        )
+        tostring(number)
 
     while true do
-
         local formatted,
             replacements =
             string.gsub(
@@ -563,7 +562,6 @@ end
 local function ensureStorageSource(
     computerID
 )
-
     if not storageSources[
         computerID
     ] then
@@ -579,14 +577,13 @@ local function ensureStorageSource(
 end
 
 -- =========================================================
--- PROCESS MANIFEST
+-- MANIFEST
 -- =========================================================
 
 local function processStorageManifest(
     senderID,
     message
 )
-
     if type(
         message.enabledKeys
     ) ~= "table" then
@@ -603,9 +600,7 @@ local function processStorageManifest(
         ) do
 
         if type(itemID)
-                == "string"
-            and itemID
-                ~= "" then
+            == "string" then
 
             enabled[
                 itemID
@@ -642,19 +637,19 @@ local function processStorageManifest(
     end
 
     if changed then
-        screenDirty = true
+        screenDirty =
+            true
     end
 end
 
 -- =========================================================
--- PROCESS INVENTORY UPDATE
+-- INVENTORY UPDATE
 -- =========================================================
 
 local function processInventoryUpdate(
     senderID,
     message
 )
-
     local itemID =
         message.itemID
         or message.storageKey
@@ -673,13 +668,8 @@ local function processInventoryUpdate(
     source[
         itemID
     ] = {
-
         itemID =
             itemID,
-
-        storageKey =
-            message.storageKey
-            or itemID,
 
         displayName =
             message.displayName
@@ -688,15 +678,13 @@ local function processInventoryUpdate(
         amount =
             tonumber(
                 message.amount
-            )
-            or 0,
+            ) or 0,
 
         targetAmount =
             tonumber(
                 message.targetAmount
                 or message.target
-            )
-            or 0,
+            ) or 0,
 
         found =
             message.found
@@ -715,34 +703,28 @@ local function processInventoryUpdate(
             )
     }
 
-    screenDirty = true
+    screenDirty =
+        true
 end
 
 -- =========================================================
 -- MACHINE STATUS
---
--- Actual machine computer broadcasts this.
--- Main uses it ONLY for visual machine-running chase.
 -- =========================================================
 
 local function processMachineStatus(
     senderID,
     message
 )
-
-    local itemID =
+    if type(
         message.itemID
-
-    if type(itemID)
-        ~= "string" then
+    ) ~= "string" then
 
         return
     end
 
     machineStates[
-        itemID
+        message.itemID
     ] = {
-
         running =
             message.state
             == true,
@@ -762,21 +744,59 @@ local function processMachineStatus(
             )
     }
 
-    screenDirty = true
+    screenDirty =
+        true
 end
 
 -- =========================================================
--- REBUILD AGGREGATED CARDS
---
--- IMPORTANT:
---
--- This is NOT called from the animation loop anymore.
---
--- Only the render loop calls it when screenDirty = true.
+-- CONFIG REFRESH ACK
+-- =========================================================
+
+local function processConfigStatus(
+    senderID,
+    message
+)
+    if message.command
+        ~= "targets_refresh_status" then
+
+        return
+    end
+
+    refreshStatus.active =
+        true
+
+    refreshStatus.lastComputer =
+        senderID
+
+    if message.success then
+        refreshStatus.successCount =
+            refreshStatus.successCount
+            + 1
+
+        refreshStatus.lastMessage =
+            "Computer "
+            .. senderID
+            .. " updated"
+    else
+        refreshStatus.failureCount =
+            refreshStatus.failureCount
+            + 1
+
+        refreshStatus.lastMessage =
+            "Computer "
+            .. senderID
+            .. " FAILED"
+    end
+
+    screenDirty =
+        true
+end
+
+-- =========================================================
+-- AGGREGATE CARDS
 -- =========================================================
 
 local function rebuildCards()
-
     local now =
         os.epoch(
             "utc"
@@ -784,11 +804,7 @@ local function rebuildCards()
 
     local combined = {}
 
-    -- =====================================================
-    -- STORAGE
-    -- =====================================================
-
-    for computerID,
+    for _,
         source
         in pairs(
             storageSources
@@ -807,10 +823,9 @@ local function rebuildCards()
                     or 0
                 )
 
-            -- Completely remove stale source report.
             if age
                 > sourceRemoveSeconds
-                * 1000 then
+                    * 1000 then
 
                 source[
                     itemID
@@ -818,16 +833,13 @@ local function rebuildCards()
                     nil
 
             else
-
                 local card =
                     combined[
                         itemID
                     ]
 
                 if not card then
-
                     card = {
-
                         itemID =
                             itemID,
 
@@ -878,8 +890,7 @@ local function rebuildCards()
                     + (
                         tonumber(
                             data.amount
-                        )
-                        or 0
+                        ) or 0
                     )
 
                 if tonumber(
@@ -909,7 +920,7 @@ local function rebuildCards()
 
                 if age
                         <= sourceOfflineSeconds
-                        * 1000
+                            * 1000
                     and data.online then
 
                     card.online =
@@ -921,7 +932,6 @@ local function rebuildCards()
                 end
 
                 if not data.found then
-
                     card.found =
                         false
                 end
@@ -956,7 +966,7 @@ local function rebuildCards()
 
         if age
             > sourceRemoveSeconds
-            * 1000 then
+                * 1000 then
 
             machineStates[
                 itemID
@@ -994,7 +1004,6 @@ local function rebuildCards()
     table.sort(
         cardOrder,
         function(a, b)
-
             return string.lower(
                 cards[a].name
                 or a
@@ -1008,13 +1017,12 @@ local function rebuildCards()
 end
 
 -- =========================================================
--- PERCENTAGE
+-- PERCENT
 -- =========================================================
 
 local function calculatePercentage(
     card
 )
-
     local amount =
         tonumber(
             card.amount
@@ -1056,14 +1064,13 @@ end
 local function hasError(
     card
 )
-
     if not card.online then
         return true
     end
 
     if card.error
         and card.error
-        ~= "" then
+            ~= "" then
 
         return true
     end
@@ -1086,15 +1093,13 @@ end
 local function getErrorText(
     card
 )
-
     if not card.online then
-
         return "DISCONNECTED"
     end
 
     if card.error
         and card.error
-        ~= "" then
+            ~= "" then
 
         return string.upper(
             tostring(
@@ -1104,7 +1109,6 @@ local function getErrorText(
     end
 
     if not card.found then
-
         return "STORAGE NOT FOUND"
     end
 
@@ -1126,16 +1130,13 @@ end
 local function getBorderColor(
     card
 )
-
     if hasError(
         card
     ) then
 
         if flashState then
-
             return theme.errorRed
         else
-
             return theme.errorOrange
         end
     end
@@ -1146,39 +1147,30 @@ local function getBorderColor(
         )
 
     if not percentage then
-
         if flashState then
-
             return theme.errorRed
         else
-
             return theme.errorOrange
         end
     end
 
     if percentage < 25 then
-
         if flashState then
-
             return theme.criticalRed
         else
-
             return theme.criticalBlack
         end
     end
 
     if percentage < 50 then
-
         return theme.low
     end
 
     if percentage < 75 then
-
         return theme.warning
     end
 
     if percentage >= 100 then
-
         return theme.full
     end
 
@@ -1188,7 +1180,6 @@ end
 local function getProgressColor(
     card
 )
-
     local percentage =
         calculatePercentage(
             card
@@ -1201,12 +1192,10 @@ local function getProgressColor(
     end
 
     if percentage < 75 then
-
         return theme.progressWarning
     end
 
     if percentage >= 100 then
-
         return theme.progressFull
     end
 
@@ -1218,7 +1207,6 @@ end
 -- =========================================================
 
 local function calculateLayout()
-
     local width,
         height =
         monitor.getSize()
@@ -1232,7 +1220,6 @@ local function calculateLayout()
     local verticalGap = 1
 
     local topY = 7
-
     local bottomY =
         height - 2
 
@@ -1249,17 +1236,16 @@ local function calculateLayout()
             (
                 availableWidth
                 - horizontalGap
-                * (
-                    columns - 1
-                )
+                    * (
+                        columns - 1
+                    )
             )
             / columns
         )
 
     if cardWidth < 10 then
-
         error(
-            "Monitor too narrow for 5 columns"
+            "Monitor too narrow"
         )
     end
 
@@ -1267,23 +1253,23 @@ local function calculateLayout()
         columns
         * cardWidth
         + horizontalGap
-        * (
-            columns - 1
-        )
+            * (
+                columns - 1
+            )
 
     local totalGridHeight =
         rows
         * cardHeight
         + verticalGap
-        * (
-            rows - 1
-        )
+            * (
+                rows - 1
+            )
 
     if totalGridHeight
         > availableHeight then
 
         error(
-            "Monitor too short for 8 rows"
+            "Monitor too short"
         )
     end
 
@@ -1328,18 +1314,18 @@ local function calculateLayout()
         local x1 =
             startX
             + column
-            * (
-                cardWidth
-                + horizontalGap
-            )
+                * (
+                    cardWidth
+                    + horizontalGap
+                )
 
         local y1 =
             startY
             + row
-            * (
-                cardHeight
-                + verticalGap
-            )
+                * (
+                    cardHeight
+                    + verticalGap
+                )
 
         local x2 =
             x1
@@ -1354,10 +1340,8 @@ local function calculateLayout()
         layoutSlots[
             index
         ] = {
-
             x1 = x1,
             y1 = y1,
-
             x2 = x2,
             y2 = y2,
 
@@ -1371,28 +1355,44 @@ local function calculateLayout()
         }
     end
 
-    local rebootWidth = 18
+    -- =====================================================
+    -- HEADER BUTTONS
+    -- =====================================================
 
-    rebootButton.x1 =
-        width
-        - rebootWidth
-        - 1
+    local rebootWidth = 14
+    local refreshWidth = 24
 
     rebootButton.x2 =
         width - 2
 
+    rebootButton.x1 =
+        rebootButton.x2
+        - rebootWidth
+        + 1
+
     rebootButton.y1 = 2
     rebootButton.y2 = 4
+
+    refreshButton.x2 =
+        rebootButton.x1
+        - 2
+
+    refreshButton.x1 =
+        refreshButton.x2
+        - refreshWidth
+        + 1
+
+    refreshButton.y1 = 2
+    refreshButton.y2 = 4
 end
 
 -- =========================================================
--- HEADER
+-- HEADER BUTTONS
 -- =========================================================
 
 local function drawRebootButton(
     color
 )
-
     fill(
         rebootButton.x1,
         rebootButton.y1,
@@ -1411,8 +1411,28 @@ local function drawRebootButton(
     )
 end
 
-local function drawHeader()
+local function drawRefreshButton(
+    color
+)
+    fill(
+        refreshButton.x1,
+        refreshButton.y1,
+        refreshButton.x2,
+        refreshButton.y2,
+        color
+    )
 
+    centerInside(
+        refreshButton.x1,
+        refreshButton.x2,
+        refreshButton.y1 + 1,
+        "REFRESH TARGETS",
+        colors.white,
+        color
+    )
+end
+
+local function drawHeader()
     local width =
         monitor.getSize()
 
@@ -1432,12 +1452,44 @@ local function drawHeader()
         theme.header
     )
 
+    local subtitle =
+        "TARGET BASED RESOURCE STORAGE"
+
+    if refreshStatus.active then
+        local age =
+            os.epoch("utc")
+            - refreshStatus.started
+
+        if age
+            <= refreshMessageSeconds
+                * 1000 then
+
+            subtitle =
+                "TARGET REFRESH: "
+                .. refreshStatus.successCount
+                .. " OK / "
+                .. refreshStatus.failureCount
+                .. " FAILED"
+        else
+            refreshStatus.active =
+                false
+        end
+    end
+
     writeAt(
         3,
         3,
-        "TARGET BASED RESOURCE STORAGE",
+        shortenText(
+            subtitle,
+            refreshButton.x1
+            - 6
+        ),
         theme.headerSubtext,
         theme.header
+    )
+
+    drawRefreshButton(
+        theme.refreshButton
     )
 
     drawRebootButton(
@@ -1454,7 +1506,7 @@ local function drawHeader()
 end
 
 -- =========================================================
--- PROGRESS BAR TEXT
+-- PROGRESS BAR
 -- =========================================================
 
 local function drawCenteredBarText(
@@ -1465,7 +1517,6 @@ local function drawCenteredBarText(
     filledUntil,
     filledColor
 )
-
     local width =
         x2 - x1 + 1
 
@@ -1517,14 +1568,9 @@ local function drawCenteredBarText(
     end
 end
 
--- =========================================================
--- PROGRESS BAR
--- =========================================================
-
 local function drawProgressBar(
     card
 )
-
     local y =
         card.y1 + 3
 
@@ -1537,10 +1583,6 @@ local function drawProgressBar(
     local width =
         x2 - x1 + 1
 
-    if width <= 0 then
-        return
-    end
-
     fill(
         x1,
         y,
@@ -1548,12 +1590,6 @@ local function drawProgressBar(
         y,
         theme.progressBackground
     )
-
-    -- =====================================================
-    -- ERROR
-    --
-    -- Show empty bar with centered error message.
-    -- =====================================================
 
     if hasError(
         card
@@ -1578,20 +1614,6 @@ local function drawProgressBar(
             card
         )
 
-    if not percentage then
-
-        drawCenteredBarText(
-            x1,
-            x2,
-            y,
-            "ERROR",
-            nil,
-            nil
-        )
-
-        return
-    end
-
     local filledWidth =
         math.floor(
             width
@@ -1606,7 +1628,6 @@ local function drawProgressBar(
     end
 
     if filledWidth > width then
-
         filledWidth = width
     end
 
@@ -1619,7 +1640,6 @@ local function drawProgressBar(
         nil
 
     if filledWidth > 0 then
-
         filledUntil =
             x1
             + filledWidth
@@ -1660,7 +1680,6 @@ end
 local function drawMachineChase(
     card
 )
-
     if not card.machineRunning then
         return
     end
@@ -1674,13 +1693,10 @@ local function drawMachineChase(
         return
     end
 
-    local pointCount =
-        #points
-
     local startIndex =
         (
             chaseFrame
-            % pointCount
+            % #points
         ) + 1
 
     for offset = 0,
@@ -1692,7 +1708,7 @@ local function drawMachineChase(
                 + offset
                 - 1
             )
-            % pointCount
+            % #points
             + 1
 
         local point =
@@ -1708,18 +1724,9 @@ local function drawMachineChase(
     end
 end
 
--- =========================================================
--- DRAW BORDER ONLY
---
--- Used by animation loop.
---
--- Does NOT touch card interior.
--- =========================================================
-
 local function drawCardBorder(
     card
 )
-
     drawBorder(
         card.x1,
         card.y1,
@@ -1730,23 +1737,19 @@ local function drawCardBorder(
         )
     )
 
-    if card.machineRunning then
-
-        drawMachineChase(
-            card
-        )
-    end
+    drawMachineChase(
+        card
+    )
 end
 
 -- =========================================================
--- PLACEHOLDER
+-- CARDS
 -- =========================================================
 
 local function drawPlaceholder(
     slot,
     index
 )
-
     drawBorder(
         slot.x1,
         slot.y1,
@@ -1774,14 +1777,9 @@ local function drawPlaceholder(
     )
 end
 
--- =========================================================
--- DRAW CARD
--- =========================================================
-
 local function drawCard(
     card
 )
-
     drawCardBorder(
         card
     )
@@ -1810,22 +1808,16 @@ local function drawCard(
         card
     )
 
-    -- Redraw chase because filling card interior may touch
-    -- corner/background pixels depending on card size.
-    if card.machineRunning then
-
-        drawMachineChase(
-            card
-        )
-    end
+    drawMachineChase(
+        card
+    )
 end
 
 -- =========================================================
--- FOOTER COUNTERS
+-- COUNTS
 -- =========================================================
 
 local function countOnline()
-
     local count = 0
 
     for _,
@@ -1834,13 +1826,9 @@ local function countOnline()
             cardOrder
         ) do
 
-        local card =
-            cards[
-                itemID
-            ]
-
-        if card
-            and card.online then
+        if cards[itemID]
+            and cards[itemID]
+                .online then
 
             count =
                 count + 1
@@ -1851,7 +1839,6 @@ local function countOnline()
 end
 
 local function countErrors()
-
     local count = 0
 
     for _,
@@ -1860,14 +1847,9 @@ local function countErrors()
             cardOrder
         ) do
 
-        local card =
-            cards[
-                itemID
-            ]
-
-        if card
+        if cards[itemID]
             and hasError(
-                card
+                cards[itemID]
             ) then
 
             count =
@@ -1879,7 +1861,6 @@ local function countErrors()
 end
 
 local function countCritical()
-
     local count = 0
 
     for _,
@@ -1889,9 +1870,7 @@ local function countCritical()
         ) do
 
         local card =
-            cards[
-                itemID
-            ]
+            cards[itemID]
 
         if card
             and not hasError(
@@ -1916,7 +1895,6 @@ local function countCritical()
 end
 
 local function countRunning()
-
     local count = 0
 
     for _,
@@ -1925,13 +1903,8 @@ local function countRunning()
             cardOrder
         ) do
 
-        local card =
-            cards[
-                itemID
-            ]
-
-        if card
-            and card
+        if cards[itemID]
+            and cards[itemID]
                 .machineRunning then
 
             count =
@@ -1942,8 +1915,11 @@ local function countRunning()
     return count
 end
 
-local function drawFooter()
+-- =========================================================
+-- FOOTER
+-- =========================================================
 
+local function drawFooter()
     local width,
         height =
         monitor.getSize()
@@ -1978,36 +1954,13 @@ local function drawFooter()
         theme.footerText,
         theme.footer
     )
-
-    local modemText =
-        "MODEM: "
-        .. string.upper(
-            modemSide
-        )
-
-    if width
-        - #modemText
-        > #text + 3 then
-
-        writeAt(
-            width
-            - #modemText,
-            height,
-            modemText,
-            theme.footerText,
-            theme.footer
-        )
-    end
 end
 
 -- =========================================================
--- FULL SCREEN DRAW
---
--- ONLY renderLoop calls this during normal operation.
+-- FULL DRAW
 -- =========================================================
 
 local function drawScreen()
-
     rebuildCards()
 
     local width,
@@ -2038,7 +1991,6 @@ local function drawScreen()
             ]
 
         if itemID then
-
             local card =
                 cards[
                     itemID
@@ -2062,9 +2014,7 @@ local function drawScreen()
             drawCard(
                 card
             )
-
         else
-
             drawPlaceholder(
                 slot,
                 index
@@ -2076,11 +2026,10 @@ local function drawScreen()
 end
 
 -- =========================================================
--- REQUEST DISCOVERY
+-- DISCOVERY
 -- =========================================================
 
 local function requestDiscovery()
-
     rednet.broadcast(
         {
             command =
@@ -2099,63 +2048,75 @@ local function requestDiscovery()
 end
 
 -- =========================================================
+-- FORCE TARGET REFRESH
+-- =========================================================
+
+local function forceTargetRefresh()
+    refreshStatus.active =
+        true
+
+    refreshStatus.started =
+        os.epoch(
+            "utc"
+        )
+
+    refreshStatus.successCount =
+        0
+
+    refreshStatus.failureCount =
+        0
+
+    refreshStatus.lastMessage =
+        "Sending refresh..."
+
+    refreshStatus.lastComputer =
+        nil
+
+    drawRefreshButton(
+        theme.refreshPressed
+    )
+
+    rednet.broadcast(
+        {
+            command =
+                "force_targets_refresh",
+
+            senderID =
+                os.getComputerID(),
+
+            timestamp =
+                os.epoch(
+                    "utc"
+                )
+        },
+        configControlProtocol
+    )
+
+    screenDirty =
+        true
+end
+
+-- =========================================================
 -- REBOOT
 -- =========================================================
 
 local function rebootComputer()
-
     drawRebootButton(
         theme.rebootPressed
     )
 
-    monitor.setBackgroundColor(
-        colors.black
-    )
-
-    monitor.setTextColor(
-        colors.white
-    )
-
-    monitor.clear()
-
-    local width,
-        height =
-        monitor.getSize()
-
-    centerInside(
-        1,
-        width,
-        math.floor(
-            height / 2
-        ),
-        "REBOOTING STORAGE SYSTEM...",
-        colors.cyan,
-        colors.black
-    )
+    sleep(0.15)
 
     os.reboot()
 end
 
 -- =========================================================
 -- RENDER LOOP
---
--- THIS IS THE FLICKER FIX.
---
--- Incoming packets:
---     update tables
---     screenDirty = true
---
--- Renderer:
---     redraws ONCE after many packets
---
 -- =========================================================
 
 local function renderLoop()
-
     while true do
-
         if screenDirty then
-
             screenDirty =
                 false
 
@@ -2170,20 +2131,10 @@ end
 
 -- =========================================================
 -- ANIMATION LOOP
---
--- IMPORTANT:
---
--- NO rebuildCards()
--- NO drawScreen()
--- NO monitor.clear()
---
--- Only redraws borders that actually animate.
 -- =========================================================
 
 local function animationLoop()
-
     while true do
-
         chaseFrame =
             chaseFrame + 1
 
@@ -2214,23 +2165,16 @@ local function animationLoop()
                 cardOrder
             ) do
 
-            if index
-                <= maxStorages then
-
+            if index <= maxStorages then
                 local card =
-                    cards[
-                        itemID
-                    ]
+                    cards[itemID]
 
                 local slot =
-                    layoutSlots[
-                        index
-                    ]
+                    layoutSlots[index]
 
                 if card
                     and slot then
 
-                    -- Keep geometry current.
                     card.x1 =
                         slot.x1
 
@@ -2246,27 +2190,12 @@ local function animationLoop()
                     card.borderPoints =
                         slot.borderPoints
 
-                    -- =========================================
-                    -- MACHINE RUNNING
-                    --
-                    -- Continuously animate.
-                    -- =========================================
-
-                    if card
-                        .machineRunning then
-
+                    if card.machineRunning then
                         drawCardBorder(
                             card
                         )
 
-                    -- =========================================
-                    -- FLASHING ERROR / CRITICAL
-                    --
-                    -- Only redraw when flash changes.
-                    -- =========================================
-
                     elseif flashChanged then
-
                         local percentage =
                             calculatePercentage(
                                 card
@@ -2301,7 +2230,6 @@ end
 -- =========================================================
 
 local function eventLoop()
-
     local discoveryTimer =
         os.startTimer(
             discoveryInterval
@@ -2311,7 +2239,6 @@ local function eventLoop()
         os.startTimer(2)
 
     while true do
-
         local event,
             a,
             b,
@@ -2319,7 +2246,7 @@ local function eventLoop()
             os.pullEvent()
 
         -- =================================================
-        -- REDNET
+        -- NETWORK
         -- =================================================
 
         if event
@@ -2334,17 +2261,12 @@ local function eventLoop()
             local protocol =
                 c
 
-            -- =============================================
-            -- STORAGE
-            -- =============================================
-
             if protocol
                     == storageStatusProtocol
                 and type(message)
                     == "table" then
 
-                if message
-                    .messageType
+                if message.messageType
                     == "storage_manifest" then
 
                     processStorageManifest(
@@ -2352,8 +2274,7 @@ local function eventLoop()
                         message
                     )
 
-                elseif message
-                    .messageType
+                elseif message.messageType
                     == "inventory_update" then
 
                     processInventoryUpdate(
@@ -2362,19 +2283,24 @@ local function eventLoop()
                     )
                 end
 
-            -- =============================================
-            -- MACHINE STATUS
-            -- =============================================
-
             elseif protocol
                     == machineStatusProtocol
                 and type(message)
                     == "table"
-                and message
-                    .messageType
+                and message.messageType
                     == "resource_machine_status" then
 
                 processMachineStatus(
+                    senderID,
+                    message
+                )
+
+            elseif protocol
+                    == configStatusProtocol
+                and type(message)
+                    == "table" then
+
+                processConfigStatus(
                     senderID,
                     message
                 )
@@ -2382,18 +2308,17 @@ local function eventLoop()
 
         -- =================================================
         -- TOUCH
-        --
-        -- ONLY REBOOT IS CLICKABLE.
         -- =================================================
 
         elseif event
-            == "monitor_touch"
+                == "monitor_touch"
             and a
                 == monitorName then
 
             local x = b
             local y = c
 
+            -- REBOOT
             if isInside(
                 x,
                 y,
@@ -2404,14 +2329,26 @@ local function eventLoop()
             ) then
 
                 rebootComputer()
+
+            -- REFRESH TARGETS
+            elseif isInside(
+                x,
+                y,
+                refreshButton.x1,
+                refreshButton.y1,
+                refreshButton.x2,
+                refreshButton.y2
+            ) then
+
+                forceTargetRefresh()
             end
 
         -- =================================================
-        -- DISCOVERY TIMER
+        -- DISCOVERY
         -- =================================================
 
         elseif event
-            == "timer"
+                == "timer"
             and a
                 == discoveryTimer then
 
@@ -2423,14 +2360,11 @@ local function eventLoop()
                 )
 
         -- =================================================
-        -- STALE DATA CHECK
-        --
-        -- Mark screen dirty every 2 seconds so offline
-        -- state/removal can be recalculated.
+        -- STALE
         -- =================================================
 
         elseif event
-            == "timer"
+                == "timer"
             and a
                 == staleTimer then
 
@@ -2441,11 +2375,11 @@ local function eventLoop()
                 os.startTimer(2)
 
         -- =================================================
-        -- MONITOR RESIZE
+        -- RESIZE
         -- =================================================
 
         elseif event
-            == "monitor_resize"
+                == "monitor_resize"
             and a
                 == monitorName then
 

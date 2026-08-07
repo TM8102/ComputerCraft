@@ -103,6 +103,19 @@ return {
             stopAt = 100
         }
     },
+    ["mysticalagriculture:dye_essence"] = {
+        displayName = "Dye Essence",
+        target = 512000,
+
+        machine = {
+            computerID = 202,
+            machineKey = "dye_essence",
+            side = "back",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
     ["industrialforegoing:meat"] = {
         displayName = "Liquid Meat",
         target = 32000,
