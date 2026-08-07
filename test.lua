@@ -1,34 +1,33 @@
 term.clear()
-term.setCursorPos(1, 1)
+term.setCursorPos(1,1)
 
-print("JDT WIRED NETWORK SCAN")
-print("======================")
-print()
+local modem = peripheral.wrap("back")
 
-local names = peripheral.getNames()
-
-if #names == 0 then
-    print("No peripherals found on network.")
+if not modem then
+    print("No modem on back")
     return
 end
 
+print("REMOTE PERIPHERALS")
+print("==================")
+print()
+
+local names = modem.getNamesRemote()
+
+table.sort(names)
+
 for _, name in ipairs(names) do
-    local pType = peripheral.getType(name)
+    print(name)
+    print("Type: " .. tostring(modem.getTypeRemote(name)))
 
-    print("NAME: " .. tostring(name))
-    print("TYPE: " .. tostring(pType))
+    local methods = modem.getMethodsRemote(name)
 
-    local methods = peripheral.getMethods(name)
-
-    if methods and #methods > 0 then
-        print("METHODS:")
-
-        for _, method in ipairs(methods) do
-            print("  " .. method)
+    if methods then
+        print("Methods:")
+        for _, m in ipairs(methods) do
+            print("  " .. m)
         end
-    else
-        print("METHODS: NONE")
     end
 
-    print("----------------------------")
+    print("-----------------------------")
 end
