@@ -1,44 +1,34 @@
 term.clear()
 term.setCursorPos(1, 1)
 
-local sides = {
-    "top",
-    "bottom",
-    "left",
-    "right",
-    "front",
-    "back"
-}
-
-print("ADJACENT PERIPHERAL SCAN")
-print("========================")
+print("JDT WIRED NETWORK SCAN")
+print("======================")
 print()
 
-for _, side in ipairs(sides) do
+local names = peripheral.getNames()
 
-    print("SIDE: " .. string.upper(side))
+if #names == 0 then
+    print("No peripherals found on network.")
+    return
+end
 
-    if peripheral.isPresent(side) then
+for _, name in ipairs(names) do
+    local pType = peripheral.getType(name)
 
-        local pType = peripheral.getType(side)
+    print("NAME: " .. tostring(name))
+    print("TYPE: " .. tostring(pType))
 
-        print("Peripheral: YES")
-        print("Type: " .. tostring(pType))
-        print("Methods:")
+    local methods = peripheral.getMethods(name)
 
-        local methods = peripheral.getMethods(side)
+    if methods and #methods > 0 then
+        print("METHODS:")
 
-        if methods then
-            for _, method in ipairs(methods) do
-                print("  " .. method)
-            end
+        for _, method in ipairs(methods) do
+            print("  " .. method)
         end
-
     else
-
-        print("Peripheral: NO")
-
+        print("METHODS: NONE")
     end
 
-    print("------------------------")
+    print("----------------------------")
 end
