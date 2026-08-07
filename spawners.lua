@@ -2,69 +2,47 @@ return {
     -- =====================================================
     -- CENTRAL SPAWNER CONFIGURATION
     --
-    -- Edit this one file in GitHub instead of editing each
-    -- remote spawner computer.
+    -- SIMPLE FORMAT:
     --
-    -- Every remote node uses its own ComputerCraft ID and
-    -- loads computers[ID]. If that ID is not listed yet, the
-    -- default profile is used.
+    -- computers = {
+    --     [COMPUTER_ID] = {
+    --         front = "Spider",
+    --         back  = "Zombie",
+    --         left  = "Creeper",
+    --         right = "Skeleton"
+    --     }
+    -- }
+    --
+    -- The side is the redstone output side on that remote
+    -- computer. The text is exactly what appears on the
+    -- Mob Control Panel.
+    --
+    -- To disable a side, remove the line or set it to false.
+    -- Keys are generated automatically as side_<side>.
+    -- You do NOT need to edit the remote computers.
     -- =====================================================
 
     configUpdateInterval = 300,
     statusUpdateInterval = 4,
 
+    -- Used by a new/unlisted remote computer so you can see
+    -- its Computer ID before adding a real profile below.
     default = {
-        spawners = {
-            {
-                key = "slot_1",
-                name = "N/A",
-                outputSide = "front",
-                enabled = true
-            },
-            {
-                key = "slot_2",
-                name = "N/A",
-                outputSide = "back",
-                enabled = true
-            },
-            {
-                key = "slot_3",
-                name = "N/A",
-                outputSide = "left",
-                enabled = true
-            },
-            {
-                key = "slot_4",
-                name = "N/A",
-                outputSide = "right",
-                enabled = true
-            }
-        }
+        front = "N/A",
+        back = "N/A",
+        left = "N/A",
+        right = "N/A"
     },
 
     computers = {
-        -- =================================================
-        -- EXAMPLE
-        --
-        -- Replace 123 with the ComputerCraft ID of a remote
-        -- spawner computer, then customize only this file.
-        --
+        -- EXAMPLE:
         -- [123] = {
-        --     spawners = {
-        --         {
-        --             key = "zombie",
-        --             name = "Zombie",
-        --             outputSide = "front",
-        --             enabled = true
-        --         },
-        --         {
-        --             key = "skeleton",
-        --             name = "Skeleton",
-        --             outputSide = "back",
-        --             enabled = true
-        --         }
-        --     }
+        --     front = "Spider",
+        --     back = "Zombie",
+        --     left = "Creeper",
+        --     right = "Skeleton"
         -- },
-        -- =================================================
+
+        -- Add each remote spawner computer here.
     }
 }
