@@ -44,5 +44,17 @@ return {
         -- },
 
         -- Add each remote spawner computer here.
+        [26] = {
+             front = "N/A",
+             back = "Wither Skeletons",
+             left = "N/A",
+             right = "N/A"
+         },
+         [24] = {
+             front = "Zombie",
+             back = "Charged Creepers",
+             left = "Endermen",
+             right = "N/A"
+         }
     }
 }
