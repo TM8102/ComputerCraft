@@ -116,6 +116,19 @@ return {
             stopAt = 100
         }
     },
+    ["justdirethings:time_fluid"] = {
+        displayName = "Time Fluid",
+        target = 512000,
+
+        machine = {
+            computerID = 200,
+            machineKey = "time_fluid",
+            side = "right",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
     ["industrialforegoing:meat"] = {
         displayName = "Liquid Meat",
         target = 32000,
