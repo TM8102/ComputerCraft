@@ -90,7 +90,7 @@ return {
             stopAt = 100
         }
     },
-    ["mysticalagriculture:insanium_essence"] = {
+    ["mysticalagradditions:insanium_essence"] = {
         displayName = "Insanium Essence",
         target = 65500,
 
