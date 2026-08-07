@@ -1,22 +1,32 @@
 -- =========================================================
 -- MAIN STATUS SCREEN
--- Quick overview of resource machines, storage demand,
--- spawners, and mob-farm fans.
 --
--- Tap a resource row for a detailed machine view.
+-- Quick-glance screen ONLY.
+-- This intentionally does NOT duplicate the storage screen.
+--
+-- Shows:
+--   * Resource machines currently requested/running
+--   * Active mob spawners
+--   * Fan state
+--   * Offline warning for a machine that was active
+--
+-- Tap an active machine row for simple details.
 -- =========================================================
 
 local machineStatusProtocol = "resource_machine_status"
-local storageStatusProtocol = "inventory_status"
 local spawnerStatusProtocol = "spawner_status"
 local fanProtocol = "mob_farm_fans"
 
 local offlineSeconds = 12
 local renderInterval = 0.5
 
-local modemSide
-local monitor
-local monitorName
+local modemSide = nil
+local monitor = nil
+local monitorName = nil
+
+-- =========================================================
+-- AUTO DISCOVER MODEM + MONITOR
+-- =========================================================
 
 for _, side in ipairs({
     "top", "bottom", "left", "right", "front", "back"
@@ -56,14 +66,13 @@ monitor.setTextScale(0.5)
 -- =========================================================
 
 local machines = {}
-local storage = {}
 local spawners = {}
 local fansState = nil
 
-local screenDirty = true
 local selectedItemID = nil
 local rowButtons = {}
 local backButton = nil
+local screenDirty = true
 
 -- =========================================================
 -- HELPERS
@@ -73,10 +82,6 @@ local function now()
     return os.epoch("utc")
 end
 
-local function keyForSpawner(id, key)
-    return tostring(id) .. ":" .. tostring(key)
-end
-
 local function short(text, maximum)
     text = tostring(text or "")
 
@@ -84,52 +89,18 @@ local function short(text, maximum)
         return text
     end
 
-    return string.sub(
-        text,
-        1,
-        math.max(1, maximum - 2)
-    ) .. ".."
+    if maximum <= 2 then
+        return string.sub(text, 1, maximum)
+    end
+
+    return string.sub(text, 1, maximum - 2) .. ".."
 end
 
-local function pct(amount, target)
-    amount = tonumber(amount)
-    target = tonumber(target)
+local function isOnline(timestamp)
+    timestamp = tonumber(timestamp) or 0
 
-    if not amount
-        or not target
-        or target <= 0 then
-        return nil
-    end
-
-    return amount / target * 100
-end
-
-local function formatNumber(value)
-    value = tonumber(value)
-
-    if not value then
-        return "--"
-    end
-
-    value = math.floor(value + 0.5)
-
-    local text = tostring(value)
-    local formatted = text
-
-    while true do
-        local changed
-        formatted, changed = string.gsub(
-            formatted,
-            "^(-?%d+)(%d%d%d)",
-            "%1,%2"
-        )
-
-        if changed == 0 then
-            break
-        end
-    end
-
-    return formatted
+    return timestamp > 0
+        and now() - timestamp <= offlineSeconds * 1000
 end
 
 local function ageText(timestamp)
@@ -139,8 +110,9 @@ local function ageText(timestamp)
         return "NEVER"
     end
 
-    local ageMs = math.max(0, now() - timestamp)
-    local seconds = math.floor(ageMs / 1000)
+    local seconds = math.floor(
+        math.max(0, now() - timestamp) / 1000
+    )
 
     if seconds < 60 then
         return tostring(seconds) .. "s AGO"
@@ -152,13 +124,11 @@ local function ageText(timestamp)
         return tostring(minutes) .. "m AGO"
     end
 
-    local hours = math.floor(minutes / 60)
-    return tostring(hours) .. "h AGO"
+    return tostring(math.floor(minutes / 60)) .. "h AGO"
 end
 
-local function isOnline(timestamp)
-    return now() - (tonumber(timestamp) or 0)
-        <= offlineSeconds * 1000
+local function keyForSpawner(id, key)
+    return tostring(id) .. ":" .. tostring(key)
 end
 
 local function isInside(x, y, button)
@@ -170,88 +140,75 @@ local function isInside(x, y, button)
 end
 
 -- =========================================================
--- NETWORK PROCESSING
+-- NETWORK
 -- =========================================================
 
-local function processMachine(sender, message)
+local function processMachine(senderID, message)
     if type(message) ~= "table"
         or message.messageType ~= "resource_machine_status"
         or type(message.itemID) ~= "string" then
+
         return
     end
 
-    local row = machines[message.itemID] or {}
+    local machine = machines[message.itemID] or {}
 
-    row.itemID = message.itemID
-    row.name = message.displayName
-        or row.name
+    machine.itemID = message.itemID
+    machine.name = message.displayName
+        or machine.name
         or message.itemID
 
-    row.computerID = message.computerID or sender
-    row.machineKey = message.machineKey or row.machineKey
-    row.side = message.side or row.side
-    row.role = message.role or row.role
+    machine.computerID = message.computerID or senderID
+    machine.machineKey = message.machineKey or machine.machineKey
+    machine.side = message.side or machine.side
+    machine.role = message.role or machine.role
 
-    row.requested =
+    -- At the moment the machine node's redstone output is the
+    -- authoritative state, so state=true means it was requested
+    -- and the controller has turned that machine output on.
+    machine.requested =
         message.requested ~= nil
         and message.requested == true
         or message.state == true
 
-    row.running =
+    machine.running =
         message.running ~= nil
         and message.running == true
         or message.state == true
 
+    if message.percent ~= nil then
+        machine.percent = tonumber(message.percent)
+    end
+
     if message.amount ~= nil then
-        row.amount = tonumber(message.amount)
+        machine.amount = tonumber(message.amount)
     end
 
     if message.target ~= nil then
-        row.target = tonumber(message.target)
+        machine.target = tonumber(message.target)
     end
 
-    if message.percent ~= nil then
-        row.percent = tonumber(message.percent)
-    end
+    -- Remember whether this machine was active on its last
+    -- successful status. Useful for showing LOST warnings.
+    machine.wasActive =
+        machine.requested == true
+        or machine.running == true
 
-    row.lastUpdate = now()
+    machine.lastUpdate = now()
 
-    machines[message.itemID] = row
+    machines[message.itemID] = machine
     screenDirty = true
 end
 
-local function processStorage(message)
-    if type(message) ~= "table"
-        or message.messageType ~= "inventory_update" then
-        return
-    end
-
-    local itemID = message.itemID or message.storageKey
-
-    if type(itemID) ~= "string" then
-        return
-    end
-
-    storage[itemID] = {
-        amount = tonumber(message.amount) or 0,
-        target = tonumber(message.targetAmount or message.target) or 0,
-        name = message.displayName or itemID,
-        computerID = message.computerID,
-        role = message.role,
-        lastUpdate = now()
-    }
-
-    screenDirty = true
-end
-
-local function processSpawner(sender, message)
+local function processSpawner(senderID, message)
     if type(message) ~= "table"
         or message.messageType ~= "spawner_status" then
+
         return
     end
 
     local key = keyForSpawner(
-        sender,
+        senderID,
         message.spawnerKey
     )
 
@@ -259,8 +216,9 @@ local function processSpawner(sender, message)
         name = message.displayName
             or message.spawnerKey
             or key,
+
         state = message.state == true,
-        computerID = message.computerID or sender,
+        computerID = message.computerID or senderID,
         spawnerKey = message.spawnerKey,
         outputSide = message.outputSide,
         lastUpdate = now()
@@ -269,7 +227,7 @@ local function processSpawner(sender, message)
     screenDirty = true
 end
 
-local function processFan(message)
+local function processFans(message)
     if type(message) == "table"
         and message.command == "fans" then
 
@@ -279,7 +237,7 @@ local function processFan(message)
 end
 
 -- =========================================================
--- DRAWING HELPERS
+-- DRAWING
 -- =========================================================
 
 local function fill(x1, y1, x2, y2, background)
@@ -345,56 +303,62 @@ local function drawHeader(title, subtitle)
     )
 end
 
-local function mergedMachine(itemID)
-    local source = machines[itemID]
+-- =========================================================
+-- ACTIVE LIST BUILDERS
+-- =========================================================
 
-    if not source then
-        return nil
-    end
-
-    local result = {}
-
-    for key, value in pairs(source) do
-        result[key] = value
-    end
-
-    local stored = storage[itemID]
-
-    if stored then
-        result.name = stored.name or result.name
-        result.amount = stored.amount
-        result.target = stored.target
-        result.percent = pct(
-            stored.amount,
-            stored.target
-        )
-        result.storageComputerID = stored.computerID
-        result.storageRole = stored.role
-        result.storageLastUpdate = stored.lastUpdate
-    end
-
-    return result
-end
-
-local function sortedMachines()
+local function activeMachines()
     local rows = {}
 
-    for itemID in pairs(machines) do
-        local row = mergedMachine(itemID)
+    for _, machine in pairs(machines) do
+        local online = isOnline(machine.lastUpdate)
 
-        if row then
-            rows[#rows + 1] = row
+        if online then
+            -- Hide all normal idle machines.
+            if machine.requested or machine.running then
+                rows[#rows + 1] = machine
+            end
+        elseif machine.wasActive then
+            -- Keep an active machine visible if we lose contact
+            -- with it, so an unexpected shutdown is obvious.
+            rows[#rows + 1] = machine
         end
     end
 
     table.sort(
         rows,
         function(a, b)
-            return string.lower(
-                a.name or a.itemID
-            ) < string.lower(
-                b.name or b.itemID
-            )
+            local aOnline = isOnline(a.lastUpdate)
+            local bOnline = isOnline(b.lastUpdate)
+
+            if aOnline ~= bOnline then
+                return not aOnline
+            end
+
+            return string.lower(a.name or a.itemID)
+                < string.lower(b.name or b.itemID)
+        end
+    )
+
+    return rows
+end
+
+local function activeSpawners()
+    local rows = {}
+
+    for _, spawner in pairs(spawners) do
+        if spawner.state
+            and isOnline(spawner.lastUpdate) then
+
+            rows[#rows + 1] = spawner
+        end
+    end
+
+    table.sort(
+        rows,
+        function(a, b)
+            return string.lower(a.name)
+                < string.lower(b.name)
         end
     )
 
@@ -411,172 +375,161 @@ local function drawOverview()
     rowButtons = {}
     backButton = nil
 
-    fill(
-        1,
-        1,
-        width,
-        height,
-        colors.black
-    )
+    fill(1, 1, width, height, colors.black)
 
     drawHeader(
         "SYSTEM STATUS",
-        "TAP A RESOURCE FOR DETAILS"
+        "ACTIVE / REQUESTED EQUIPMENT ONLY"
     )
 
-    local rows = sortedMachines()
-    local nowMs = now()
+    local machineRows = activeMachines()
+    local spawnerRows = activeSpawners()
 
     local y = 6
-
-    local reqX = math.floor(width * 0.46)
-    local runX = math.floor(width * 0.58)
-    local pcX = math.floor(width * 0.69)
-    local levelX = math.floor(width * 0.80)
 
     writeAt(
         2,
         y,
-        "RESOURCE",
-        colors.lightGray,
+        "RESOURCE MACHINES",
+        colors.lightBlue,
         colors.black
     )
 
-    writeAt(reqX, y, "REQ", colors.lightGray, colors.black)
-    writeAt(runX, y, "RUN", colors.lightGray, colors.black)
-    writeAt(pcX, y, "PC", colors.lightGray, colors.black)
-    writeAt(levelX, y, "LEVEL", colors.lightGray, colors.black)
+    y = y + 2
 
-    y = y + 1
-
-    local maxRows = math.max(1, height - 13)
-
-    for index = 1, math.min(#rows, maxRows) do
-        local machine = rows[index]
-        local online = isOnline(machine.lastUpdate)
-
-        local requestText =
-            machine.requested and "YES" or "NO"
-
-        local runningText
-
-        if not online then
-            runningText = "LOST"
-        elseif machine.running then
-            runningText = "ON"
-        else
-            runningText = "OFF"
-        end
-
-        local levelText =
-            machine.percent
-            and string.format(
-                "%.0f%%",
-                machine.percent
-            )
-            or "--"
-
-        local rowBackground =
-            index % 2 == 0
-            and colors.black
-            or colors.gray
-
-        fill(
-            1,
+    if #machineRows == 0 then
+        writeAt(
+            3,
             y,
-            width,
-            y,
-            rowBackground
+            "ALL RESOURCE MACHINES IDLE",
+            colors.gray,
+            colors.black
         )
 
+        y = y + 2
+    else
+        for index, machine in ipairs(machineRows) do
+            if y >= height - 8 then
+                break
+            end
+
+            local online = isOnline(machine.lastUpdate)
+
+            local background =
+                index % 2 == 0
+                and colors.black
+                or colors.gray
+
+            fill(1, y, width, y + 1, background)
+
+            writeAt(
+                2,
+                y,
+                short(
+                    string.upper(
+                        machine.name or machine.itemID
+                    ),
+                    math.max(10, math.floor(width * 0.52))
+                ),
+                colors.white,
+                background
+            )
+
+            local stateText
+            local stateColor
+
+            if not online then
+                stateText = "OFFLINE / LOST"
+                stateColor = colors.orange
+            elseif machine.running then
+                stateText = "RUNNING"
+                stateColor = colors.lime
+            elseif machine.requested then
+                stateText = "REQUESTED"
+                stateColor = colors.orange
+            else
+                stateText = "ACTIVE"
+                stateColor = colors.lightBlue
+            end
+
+            writeAt(
+                math.floor(width * 0.58),
+                y,
+                stateText,
+                stateColor,
+                background
+            )
+
+            local extra =
+                "PC "
+                .. tostring(machine.computerID or "?")
+                .. "  "
+                .. string.upper(
+                    tostring(machine.side or "?")
+                )
+
+            if machine.percent then
+                extra = extra
+                    .. "  "
+                    .. string.format("%.0f%%", machine.percent)
+            end
+
+            writeAt(
+                3,
+                y + 1,
+                short(extra, width - 5),
+                colors.lightGray,
+                background
+            )
+
+            rowButtons[#rowButtons + 1] = {
+                x1 = 1,
+                y1 = y,
+                x2 = width,
+                y2 = y + 1,
+                itemID = machine.itemID
+            }
+
+            y = y + 2
+        end
+    end
+
+    if y < height - 7 then
         writeAt(
             2,
             y,
-            short(
-                machine.name or machine.itemID,
-                math.floor(width * 0.42) - 2
-            ),
-            colors.white,
-            rowBackground
-        )
-
-        writeAt(
-            reqX,
-            y,
-            requestText,
-            machine.requested
-                and colors.orange
-                or colors.lightGray,
-            rowBackground
-        )
-
-        writeAt(
-            runX,
-            y,
-            runningText,
-            online
-                and (
-                    machine.running
-                    and colors.lime
-                    or colors.red
-                )
-                or colors.orange,
-            rowBackground
-        )
-
-        writeAt(
-            pcX,
-            y,
-            tostring(machine.computerID or "?"),
+            "ACTIVE SPAWNERS",
             colors.lightBlue,
-            rowBackground
+            colors.black
         )
 
-        writeAt(
-            levelX,
-            y,
-            levelText,
-            colors.white,
-            rowBackground
-        )
+        y = y + 2
 
-        rowButtons[#rowButtons + 1] = {
-            x1 = 1,
-            y1 = y,
-            x2 = width,
-            y2 = y,
-            itemID = machine.itemID
-        }
+        if #spawnerRows == 0 then
+            writeAt(
+                3,
+                y,
+                "NONE",
+                colors.gray,
+                colors.black
+            )
+        else
+            local names = {}
 
-        y = y + 1
-    end
+            for _, spawner in ipairs(spawnerRows) do
+                names[#names + 1] = spawner.name
+            end
 
-    local configured = 0
-    local active = 0
-    local offline = 0
-
-    for _, spawner in pairs(spawners) do
-        configured = configured + 1
-
-        if nowMs - (spawner.lastUpdate or 0)
-            > offlineSeconds * 1000 then
-            offline = offline + 1
-        elseif spawner.state then
-            active = active + 1
-        end
-    end
-
-    local requestedCount = 0
-    local runningCount = 0
-
-    for _, machine in ipairs(rows) do
-        if machine.requested then
-            requestedCount = requestedCount + 1
-        end
-
-        if machine.running
-            and isOnline(machine.lastUpdate) then
-            runningCount = runningCount + 1
+            writeAt(
+                3,
+                y,
+                short(
+                    table.concat(names, "  |  "),
+                    width - 5
+                ),
+                colors.lime,
+                colors.black
+            )
         end
     end
 
@@ -590,54 +543,52 @@ local function drawOverview()
         colors.gray
     )
 
+    local machineText =
+        "ACTIVE MACHINES " .. #machineRows
+        .. "  ACTIVE SPAWNERS " .. #spawnerRows
+
     writeAt(
         2,
         footerY + 1,
-        "MACHINES "
-            .. #rows
-            .. "  REQUESTED "
-            .. requestedCount
-            .. "  RUNNING "
-            .. runningCount,
+        short(machineText, width - 3),
         colors.white,
         colors.gray
     )
 
+    local fanText =
+        "FANS: "
+        .. (
+            fansState == nil
+            and "UNKNOWN"
+            or (
+                fansState
+                and "ON"
+                or "OFF"
+            )
+        )
+
     writeAt(
         2,
         footerY + 2,
-        "SPAWNERS "
-            .. configured
-            .. "  ACTIVE "
-            .. active
-            .. "  OFFLINE "
-            .. offline
-            .. "  FANS "
-            .. (
+        fanText,
+        fansState
+            and colors.lime
+            or (
                 fansState == nil
-                and "?"
-                or (
-                    fansState
-                    and "ON"
-                    or "OFF"
-                )
+                and colors.orange
+                or colors.white
             ),
-        colors.white,
         colors.gray
     )
 end
 
 -- =========================================================
--- MACHINE DETAIL VIEW
+-- SIMPLE MACHINE DETAILS
 -- =========================================================
 
-local function detailLine(
-    y,
-    label,
-    value,
-    valueColor
-)
+local function detailLine(y, label, value, valueColor)
     local width = monitor.getSize()
+    local valueX = math.max(18, math.floor(width * 0.30))
 
     writeAt(
         3,
@@ -645,11 +596,6 @@ local function detailLine(
         label,
         colors.lightGray,
         colors.black
-    )
-
-    local valueX = math.max(
-        20,
-        math.floor(width * 0.30)
     )
 
     writeAt(
@@ -666,7 +612,7 @@ end
 
 local function drawDetail()
     local width, height = monitor.getSize()
-    local machine = mergedMachine(selectedItemID)
+    local machine = machines[selectedItemID]
 
     rowButtons = {}
 
@@ -676,20 +622,12 @@ local function drawDetail()
         return
     end
 
-    fill(
-        1,
-        1,
-        width,
-        height,
-        colors.black
-    )
+    fill(1, 1, width, height, colors.black)
 
     drawHeader(
-        "MACHINE DETAILS",
+        "ACTIVE MACHINE",
         short(
-            string.upper(
-                machine.name or machine.itemID
-            ),
+            string.upper(machine.name or machine.itemID),
             width - 6
         )
     )
@@ -721,206 +659,82 @@ local function drawDetail()
     local online = isOnline(machine.lastUpdate)
     local y = 6
 
-    detailLine(
-        y,
-        "RESOURCE",
-        machine.name or machine.itemID,
-        colors.white
-    )
+    local stateText
+    local stateColor
+
+    if not online then
+        stateText = "OFFLINE / LOST"
+        stateColor = colors.orange
+    elseif machine.running then
+        stateText = "RUNNING"
+        stateColor = colors.lime
+    elseif machine.requested then
+        stateText = "REQUESTED"
+        stateColor = colors.orange
+    else
+        stateText = "IDLE"
+        stateColor = colors.gray
+    end
+
+    detailLine(y, "STATUS", stateText, stateColor)
     y = y + 2
 
-    detailLine(
-        y,
-        "ITEM ID",
-        machine.itemID,
-        colors.lightBlue
-    )
+    detailLine(y, "RESOURCE", machine.name or machine.itemID)
+    y = y + 1
+
+    detailLine(y, "ITEM ID", machine.itemID)
+    y = y + 1
+
+    detailLine(y, "MACHINE KEY", machine.machineKey)
+    y = y + 1
+
+    detailLine(y, "COMPUTER", machine.computerID, colors.lightBlue)
     y = y + 1
 
     detailLine(
         y,
-        "MACHINE KEY",
-        machine.machineKey or "--",
-        colors.lightBlue
+        "SIDE",
+        string.upper(tostring(machine.side or "--"))
     )
     y = y + 1
 
-    detailLine(
-        y,
-        "COMPUTER ID",
-        machine.computerID or "?",
-        colors.lightBlue
-    )
-    y = y + 1
-
-    detailLine(
-        y,
-        "OUTPUT SIDE",
-        machine.side
-            and string.upper(machine.side)
-            or "--",
-        colors.lightBlue
-    )
-    y = y + 1
-
-    detailLine(
-        y,
-        "NODE ROLE",
-        machine.role or "--",
-        colors.lightBlue
-    )
+    detailLine(y, "NODE ROLE", machine.role)
     y = y + 2
 
     detailLine(
         y,
         "REQUESTED",
         machine.requested and "YES" or "NO",
-        machine.requested
-            and colors.orange
-            or colors.lightGray
+        machine.requested and colors.orange or colors.gray
     )
     y = y + 1
 
     detailLine(
         y,
         "RUNNING",
-        online
-            and (
-                machine.running
-                and "YES"
-                or "NO"
-            )
-            or "NO SIGNAL",
-        online
-            and (
-                machine.running
-                and colors.lime
-                or colors.red
-            )
-            or colors.orange
+        machine.running and "YES" or "NO",
+        machine.running and colors.lime or colors.red
     )
     y = y + 1
 
     detailLine(
         y,
-        "ONLINE",
-        online and "YES" or "NO",
-        online and colors.lime or colors.red
-    )
-    y = y + 1
-
-    detailLine(
-        y,
-        "LAST MACHINE",
+        "LAST UPDATE",
         ageText(machine.lastUpdate),
         online and colors.white or colors.orange
     )
     y = y + 2
 
-    detailLine(
-        y,
-        "CURRENT",
-        formatNumber(machine.amount),
-        colors.white
-    )
-    y = y + 1
-
-    detailLine(
-        y,
-        "TARGET",
-        formatNumber(machine.target),
-        colors.white
-    )
-    y = y + 1
-
-    detailLine(
-        y,
-        "LEVEL",
-        machine.percent
-            and string.format(
-                "%.2f%%",
-                machine.percent
-            )
-            or "--",
-        machine.percent
-            and machine.percent >= 100
-            and colors.lime
-            or colors.white
-    )
-    y = y + 2
-
-    detailLine(
-        y,
-        "STORAGE PC",
-        machine.storageComputerID or "--",
-        colors.lightBlue
-    )
-    y = y + 1
-
-    detailLine(
-        y,
-        "STORAGE ROLE",
-        machine.storageRole or "--",
-        colors.lightBlue
-    )
-    y = y + 1
-
-    detailLine(
-        y,
-        "LAST STORAGE",
-        machine.storageLastUpdate
-            and ageText(machine.storageLastUpdate)
-            or "--",
-        colors.white
-    )
-
-    local statusY = height - 3
-
-    fill(
-        1,
-        statusY,
-        width,
-        height,
-        colors.gray
-    )
-
-    local stateText
-    local stateColor
-
-    if not online then
-        stateText = "OFFLINE / NO MACHINE STATUS"
-        stateColor = colors.orange
-    elseif machine.running then
-        stateText = "RUNNING"
-        stateColor = colors.lime
-    elseif machine.requested then
-        stateText = "REQUESTED - WAITING"
-        stateColor = colors.orange
-    else
-        stateText = "IDLE"
-        stateColor = colors.white
+    if machine.percent then
+        detailLine(
+            y,
+            "RESOURCE LEVEL",
+            string.format("%.1f%%", machine.percent)
+        )
     end
-
-    center(
-        1,
-        width,
-        statusY + 1,
-        stateText,
-        stateColor,
-        colors.gray
-    )
-
-    center(
-        1,
-        width,
-        statusY + 2,
-        "TAP BACK TO RETURN TO OVERVIEW",
-        colors.white,
-        colors.gray
-    )
 end
 
-local function draw()
+local function drawScreen()
     if selectedItemID then
         drawDetail()
     else
@@ -929,27 +743,8 @@ local function draw()
 end
 
 -- =========================================================
--- EVENTS
+-- EVENT LOOP
 -- =========================================================
-
-local function handleTouch(x, y)
-    if selectedItemID then
-        if isInside(x, y, backButton) then
-            selectedItemID = nil
-            screenDirty = true
-        end
-
-        return
-    end
-
-    for _, button in ipairs(rowButtons) do
-        if isInside(x, y, button) then
-            selectedItemID = button.itemID
-            screenDirty = true
-            return
-        end
-    end
-end
 
 local function eventLoop()
     while true do
@@ -959,20 +754,33 @@ local function eventLoop()
             if c == machineStatusProtocol then
                 processMachine(a, b)
 
-            elseif c == storageStatusProtocol then
-                processStorage(b)
-
             elseif c == spawnerStatusProtocol then
                 processSpawner(a, b)
 
             elseif c == fanProtocol then
-                processFan(b)
+                processFans(b)
             end
 
         elseif event == "monitor_touch"
             and a == monitorName then
 
-            handleTouch(b, c)
+            local x = b
+            local y = c
+
+            if selectedItemID then
+                if isInside(x, y, backButton) then
+                    selectedItemID = nil
+                    screenDirty = true
+                end
+            else
+                for _, button in ipairs(rowButtons) do
+                    if isInside(x, y, button) then
+                        selectedItemID = button.itemID
+                        screenDirty = true
+                        break
+                    end
+                end
+            end
 
         elseif event == "monitor_resize"
             and a == monitorName then
@@ -987,7 +795,7 @@ local function renderLoop()
     while true do
         if screenDirty then
             screenDirty = false
-            draw()
+            drawScreen()
         end
 
         sleep(renderInterval)
