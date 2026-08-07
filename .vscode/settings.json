@@ -1,0 +1,10 @@
+{
+    "emeraldwalk.runonsave": {
+        "commands": [
+            {
+                "match": "\\.(lua)$",
+                "cmd": "powershell -ExecutionPolicy Bypass -File \"${workspaceFolder}\\auto-push.ps1\""
+            }
+        ]
+    }
+}
