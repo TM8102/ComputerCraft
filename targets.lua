@@ -90,26 +90,13 @@ return {
             stopAt = 100
         }
     },
-    ["mysticalagricalture:dye_essence"] = {
-        displayName = "Dye Essence",
-        target = 65500,
+    ["minecraft:grass"] = {
+        displayName = "Grass",
+        target = 512000,
 
         machine = {
-            computerID = 222,
-            machineKey = "dye_essence",
-            side = "back",
-
-            startBelow = 50,
-            stopAt = 100
-        }
-    },
-    ["minecraft:diamond"] = {
-        displayName = "Diamond",
-        target = 65500,
-
-        machine = {
-            computerID = 222,
-            machineKey = "diamond",
+            computerID = 202,
+            machineKey = "grass",
             side = "top",
 
             startBelow = 50,
