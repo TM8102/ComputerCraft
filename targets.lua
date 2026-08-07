@@ -160,8 +160,8 @@ return {
         target = 65500,
 
         machine = {
-            computerID = 34
-            machineKey = "nether_star
+            computerID = 34,
+            machineKey = "nether_star,
             side = "right",
 
             startBelow = 50,
