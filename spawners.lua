@@ -50,6 +50,12 @@ return {
              left = "N/A",
              right = "N/A"
          },
+         [20] = {
+             front = "N/A",
+             back = "Spiders",
+             left = "Ghasts",
+             right = "Skeletons"
+         },
          [24] = {
              front = "Zombie",
              back = "Charged Creepers",
