@@ -1,12 +1,36 @@
-local source = peripheral.wrap("left")   -- Clicker
-local dest = peripheral.getName(peripheral.wrap("right")) -- Tank
+local side = "left" -- Change if your clicker is on another side
 
-for slot = 1, 4 do
-    print("Trying destination slot " .. slot)
+if not peripheral.isPresent(side) then
+    error("No peripheral on " .. side)
+end
 
-    local moved = source.pushItems(dest, 1, 1, slot)
+local clicker = peripheral.wrap(side)
 
-    print("Moved: " .. tostring(moved))
+if not clicker.list then
+    error("This peripheral does not expose an inventory.")
+end
 
-    sleep(2)
+term.clear()
+term.setCursorPos(1,1)
+
+print("CLICKER INVENTORY")
+print("=================")
+print()
+
+print("Size: " .. clicker.size())
+print()
+
+for slot = 1, clicker.size() do
+    local item = clicker.getItemDetail(slot)
+
+    if item then
+        print("Slot " .. slot)
+        print("  Item: " .. item.name)
+        print("  Count: " .. item.count)
+        print("  Name: " .. (item.displayName or ""))
+        print("  NBT: " .. tostring(item.nbt))
+        print()
+    else
+        print("Slot " .. slot .. ": EMPTY")
+    end
 end
