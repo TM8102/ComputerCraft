@@ -1,14 +1,14 @@
 -- =========================================================
 -- UNIVERSAL COMPUTERCRAFT STARTUP
--- Downloads the newest role script from the GitHub API on
--- every reboot, then launches it. Role is selected once and
--- saved in .computer_role.
+-- Normal computers fetch their role program from the local
+-- Master Controller over Rednet. GitHub RAW is fallback only.
+-- The Master Controller itself downloads from GitHub RAW.
 -- =========================================================
 
-local githubBase =
-    "https://api.github.com/repos/TM8102/ComputerCraft/contents/"
-
+local masterProtocol = "cc_master_update"
+local rawBase = "https://raw.githubusercontent.com/TM8102/ComputerCraft/main/"
 local roleFile = ".computer_role"
+local masterTimeout = 2.5
 
 local roles = {
     ["1"] = { name = "MAIN STORAGE SCREEN", file = "main_storage.lua" },
@@ -18,7 +18,8 @@ local roles = {
     ["5"] = { name = "TIME WAND CONTROLLER", file = "time_wand_controller.lua" },
     ["6"] = { name = "MOB CONTROL PANEL", file = "mob_control_panel.lua" },
     ["7"] = { name = "REMOTE SPAWNER NODE", file = "remote_spawner_node.lua" },
-    ["8"] = { name = "MAIN STATUS SCREEN", file = "main_status_screen.lua" }
+    ["8"] = { name = "MAIN STATUS SCREEN", file = "main_status_screen.lua" },
+    ["9"] = { name = "MASTER CONTROLLER", file = "master_controller.lua", master = true }
 }
 
 local function clearScreen()
@@ -58,6 +59,7 @@ local function chooseRole()
         print("6 - Mob Control Panel")
         print("7 - Remote Spawner Node")
         print("8 - Main Status Screen")
+        print("9 - Master Controller")
         print("")
         write("Choose role: ")
         local choice = read()
@@ -70,45 +72,111 @@ local function chooseRole()
     end
 end
 
-local function downloadProgram(program)
-    local url = githubBase .. program
-        .. "?ref=main&cb=" .. tostring(os.epoch("utc"))
+local function openAnyModem()
+    for _, side in ipairs({"back","front","left","right","top","bottom"}) do
+        if peripheral.isPresent(side) and peripheral.getType(side) == "modem" then
+            if not rednet.isOpen(side) then rednet.open(side) end
+            return side
+        end
+    end
+    return nil
+end
 
-    print("Downloading latest:")
-    print(program)
-    print("")
+local function validateProgram(program, contents)
+    if not contents or contents == "" then
+        return false, "Empty file"
+    end
 
-    local response, httpError = http.get(url,{
-        ["User-Agent"] = "CC-Tweaked",
-        ["Accept"] = "application/vnd.github.raw+json",
-        ["Cache-Control"] = "no-cache, no-store",
-        ["Pragma"] = "no-cache"
-    })
+    local loader, syntaxError = load(contents, "@" .. program, "t", _ENV)
+    if not loader then
+        return false, "Lua error: " .. tostring(syntaxError)
+    end
 
-    if not response then return false,"GitHub API failed: "..tostring(httpError) end
-    local code = response.getResponseCode and response.getResponseCode() or 200
-    local contents = response.readAll()
-    response.close()
+    return true
+end
 
-    if code < 200 or code >= 300 then return false,"GitHub HTTP "..tostring(code) end
-    if not contents or contents == "" then return false,"GitHub returned an empty file" end
+local function installProgram(program, contents)
+    local valid, validationError = validateProgram(program, contents)
+    if not valid then return false, validationError end
 
     local temp = program .. ".new"
     if fs.exists(temp) then fs.delete(temp) end
+
     local f = fs.open(temp,"w")
-    if not f then return false,"Could not create "..temp end
+    if not f then return false,"Could not create " .. temp end
     f.write(contents)
     f.close()
-
-    local loader, syntaxError = loadfile(temp)
-    if not loader then
-        fs.delete(temp)
-        return false,"Downloaded Lua error: "..tostring(syntaxError)
-    end
 
     if fs.exists(program) then fs.delete(program) end
     fs.move(temp,program)
     return true
+end
+
+local function downloadFromMaster(program)
+    local modem = openAnyModem()
+    if not modem then return false, "No modem available" end
+
+    local requestID = tostring(os.getComputerID()) .. ":" .. tostring(os.epoch("utc"))
+
+    rednet.broadcast({
+        type = "get_file",
+        file = program,
+        requestID = requestID,
+        clientID = os.getComputerID()
+    }, masterProtocol)
+
+    local timer = os.startTimer(masterTimeout)
+
+    while true do
+        local event, a, b, c = os.pullEvent()
+
+        if event == "rednet_message" then
+            local senderID, message, protocol = a, b, c
+            if protocol == masterProtocol
+                and type(message) == "table"
+                and message.type == "file_response"
+                and message.requestID == requestID
+                and message.file == program then
+
+                if not message.success then
+                    return false, "Master error: " .. tostring(message.error)
+                end
+
+                local ok, err = installProgram(program, message.contents)
+                if not ok then return false, err end
+                return true, "MASTER " .. tostring(senderID)
+            end
+
+        elseif event == "timer" and a == timer then
+            return false, "Master timeout"
+        end
+    end
+end
+
+local function downloadFromRawGitHub(program)
+    local url = rawBase .. program .. "?cb=" .. tostring(os.epoch("utc"))
+
+    local response, httpError = http.get(url, {
+        ["User-Agent"] = "CC-Tweaked",
+        ["Cache-Control"] = "no-cache, no-store",
+        ["Pragma"] = "no-cache"
+    })
+
+    if not response then
+        return false, "GitHub RAW failed: " .. tostring(httpError)
+    end
+
+    local code = response.getResponseCode and response.getResponseCode() or 200
+    local contents = response.readAll()
+    response.close()
+
+    if code < 200 or code >= 300 then
+        return false, "GitHub RAW HTTP " .. tostring(code)
+    end
+
+    local ok, err = installProgram(program, contents)
+    if not ok then return false, err end
+    return true, "GITHUB RAW"
 end
 
 clearScreen()
@@ -119,21 +187,39 @@ clearScreen()
 print(role.name)
 print(string.rep("=",#role.name))
 print("")
-print("Computer ID: "..os.getComputerID())
-print("Program: "..role.file)
+print("Computer ID: " .. os.getComputerID())
+print("Program: " .. role.file)
 print("")
 
-local success, downloadError = downloadProgram(role.file)
+local success, sourceOrError
+
+if role.master then
+    print("Master bootstrap: GitHub RAW")
+    success, sourceOrError = downloadFromRawGitHub(role.file)
+else
+    print("Looking for Master Controller...")
+    success, sourceOrError = downloadFromMaster(role.file)
+
+    if not success then
+        term.setTextColor(colors.orange)
+        print("Master unavailable: " .. tostring(sourceOrError))
+        term.setTextColor(colors.white)
+        print("Falling back to GitHub RAW...")
+        success, sourceOrError = downloadFromRawGitHub(role.file)
+    end
+end
+
 if success then
     term.setTextColor(colors.lime)
-    print("Updated successfully.")
+    print("Updated from " .. tostring(sourceOrError))
     term.setTextColor(colors.white)
 else
     term.setTextColor(colors.orange)
     print("UPDATE FAILED")
     term.setTextColor(colors.white)
-    print(tostring(downloadError))
+    print(tostring(sourceOrError))
     print("")
+
     if fs.exists(role.file) then
         print("Using existing local copy.")
     else
@@ -145,6 +231,6 @@ else
 end
 
 print("")
-print("Starting "..role.file.."...")
+print("Starting " .. role.file .. "...")
 sleep(0.5)
 shell.run(role.file)
