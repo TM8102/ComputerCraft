@@ -94,13 +94,7 @@ return {
         displayName = "Liquid Meat",
         target = 32000,
 
-        machine = {
-            computerID = 12,
-            machineKey = "pink_slime",
-            side = "top",
-
-            startBelow = 50,
-            stopAt = 100
+        machine = nil
         }
     },
 
