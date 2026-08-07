@@ -1,4 +1,4 @@
-local controllerSide = "left"
+local controllerSide = "top"
 local modemSide = "back"
 
 local targetsURL =
