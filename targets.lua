@@ -119,6 +119,7 @@ return {
     ["industrialforegoing:meat"] = {
         displayName = "Liquid Meat",
         target = 32000,
+        
         machine = nil
         
     },
