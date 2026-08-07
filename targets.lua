@@ -103,6 +103,19 @@ return {
             stopAt = 100
         }
     },
+    ["minecraft:diamond"] = {
+        displayName = "Diamon",
+        target = 65500,
+
+        machine = {
+            computerID = 222,
+            machineKey = "diamond",
+            side = "top",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
     ["industrialforegoing:meat"] = {
         displayName = "Liquid Meat",
         target = 32000,
