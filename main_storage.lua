@@ -1,6 +1,13 @@
 -- =========================================================
 -- MAIN STORAGE SCREEN
--- Prioritizes low resources and auto-pages when >45 cards.
+-- Low resources first, 45 cards/page, auto-rotation.
+-- Card layout:
+--   L1 border
+--   L2 empty
+--   L3 name
+--   L4 progress bar
+--   L5 empty
+--   L6 border
 -- =========================================================
 
 local monitorSide = "right"
@@ -12,10 +19,6 @@ local machineControlProtocol = "resource_machine_control"
 local machineStatusProtocol = "resource_machine_status"
 local configControlProtocol = "config_control"
 local configStatusProtocol = "config_status"
-
--- =========================================================
--- DISPLAY / TIMING
--- =========================================================
 
 local cardsPerPage = 45
 local pageSeconds = 15
@@ -33,13 +36,8 @@ local chaseFrame = 0
 local flashState = false
 local flashElapsed = 0
 local screenDirty = true
-
 local currentPage = 1
 local pageChangedAt = os.epoch("utc")
-
--- =========================================================
--- MONITOR / MODEM
--- =========================================================
 
 local monitor = peripheral.wrap(monitorSide)
 if not monitor then error("No monitor found on " .. monitorSide) end
@@ -52,10 +50,6 @@ if not peripheral.isPresent(modemSide) then
 end
 rednet.open(modemSide)
 
--- =========================================================
--- THEME
--- =========================================================
-
 local theme = {
     background=colors.black,
     header=colors.cyan,
@@ -66,46 +60,35 @@ local theme = {
     emptyCard=colors.black,
     title=colors.white,
     amountText=colors.white,
-
     full=colors.lime,
     good=colors.lightBlue,
     warning=colors.orange,
     low=colors.red,
     criticalRed=colors.red,
     criticalBlack=colors.black,
-
     errorRed=colors.red,
     errorOrange=colors.orange,
     machineChase=colors.lime,
-
     progressBackground=colors.black,
     progressFull=colors.lime,
     progressGood=colors.lightBlue,
     progressWarning=colors.orange,
     progressLow=colors.red,
-
     emptyBorder=colors.gray,
     placeholderText=colors.gray,
-
     rebootButton=colors.blue,
     rebootPressed=colors.lightBlue,
     refreshButton=colors.green,
     refreshPressed=colors.lime,
-
     popupBackground=colors.gray,
     popupBorder=colors.lightGray,
     popupTitle=colors.cyan,
     success=colors.lime,
     failure=colors.red,
     pending=colors.orange,
-
     footer=colors.gray,
     footerText=colors.white
 }
-
--- =========================================================
--- STATE
--- =========================================================
 
 local storageSources = {}
 local machineStates = {}
@@ -139,10 +122,6 @@ local function rememberComputer(computerID, role)
     info.lastSeen = now()
 end
 
--- =========================================================
--- DRAW HELPERS
--- =========================================================
-
 local function fill(x1,y1,x2,y2,color)
     if x2 < x1 or y2 < y1 then return end
     monitor.setBackgroundColor(color)
@@ -161,9 +140,9 @@ end
 
 local function shortenText(text,maxLength)
     text=tostring(text or "")
-    if maxLength <= 0 then return "" end
-    if #text <= maxLength then return text end
-    if maxLength <= 3 then return string.sub(text,1,maxLength) end
+    if maxLength<=0 then return "" end
+    if #text<=maxLength then return text end
+    if maxLength<=3 then return string.sub(text,1,maxLength) end
     return string.sub(text,1,maxLength-2)..".."
 end
 
@@ -210,10 +189,6 @@ local function commaNumber(number)
     end
     return text
 end
-
--- =========================================================
--- STORAGE / NETWORK DATA
--- =========================================================
 
 local function ensureStorageSource(computerID)
     if not storageSources[computerID] then storageSources[computerID]={} end
@@ -283,10 +258,6 @@ local function processRefreshStatus(senderID,message)
     screenDirty=true
 end
 
--- =========================================================
--- CARD CALCULATIONS
--- =========================================================
-
 local function calculatePercentage(card)
     local amount=tonumber(card.amount)
     local target=tonumber(card.targetAmount)
@@ -311,10 +282,7 @@ local function getErrorText(card)
 end
 
 local function priorityForCard(card)
-    -- Lowest number is shown first.
-    -- Errors / critical / red / orange all stay ahead of healthy cards.
     if hasError(card) then return 0,-1 end
-
     local p=calculatePercentage(card) or 0
     if p<25 then return 1,p end
     if p<50 then return 2,p end
@@ -407,10 +375,6 @@ local function getProgressColor(card)
     return theme.progressGood
 end
 
--- =========================================================
--- PAGE HELPERS
--- =========================================================
-
 local function pageCount()
     return math.max(1,math.ceil(#cardOrder/cardsPerPage))
 end
@@ -447,15 +411,18 @@ end
 
 -- =========================================================
 -- LAYOUT
+-- 5 columns x 9 rows = 45 cards.
+-- Cards are exactly six lines tall. Vertical gap is 0 so the
+-- 45-card capacity is preserved while using the requested shape.
 -- =========================================================
 
 local function calculateLayout()
     local width,height=monitor.getSize()
     local columns=5
     local rows=9
-    local cardHeight=5
+    local cardHeight=6
     local horizontalGap=1
-    local verticalGap=1
+    local verticalGap=0
     local topY=7
     local bottomY=height-2
     local availableWidth=width-2
@@ -466,7 +433,9 @@ local function calculateLayout()
 
     local totalGridWidth=columns*cardWidth+horizontalGap*(columns-1)
     local totalGridHeight=rows*cardHeight+verticalGap*(rows-1)
-    if totalGridHeight>availableHeight then error("Monitor too short for 45-card layout") end
+    if totalGridHeight>availableHeight then
+        error("Monitor too short for 45 six-line cards")
+    end
 
     local startX=math.floor((width-totalGridWidth)/2)+1
     local startY=topY+math.floor((availableHeight-totalGridHeight)/2)
@@ -479,7 +448,10 @@ local function calculateLayout()
         local y1=startY+row*(cardHeight+verticalGap)
         local x2=x1+cardWidth-1
         local y2=y1+cardHeight-1
-        layoutSlots[index]={x1=x1,y1=y1,x2=x2,y2=y2,borderPoints=getBorderPoints(x1,y1,x2,y2)}
+        layoutSlots[index]={
+            x1=x1,y1=y1,x2=x2,y2=y2,
+            borderPoints=getBorderPoints(x1,y1,x2,y2)
+        }
     end
 
     local rebootWidth=14
@@ -494,10 +466,6 @@ local function calculateLayout()
     refreshButton.y1=2
     refreshButton.y2=4
 end
-
--- =========================================================
--- HEADER / BUTTONS
--- =========================================================
 
 local function drawRebootButton(color)
     fill(rebootButton.x1,rebootButton.y1,rebootButton.x2,rebootButton.y2,color)
@@ -528,14 +496,11 @@ local function drawHeader()
     fill(1,6,width,6,theme.accent)
 end
 
--- =========================================================
--- CARD DRAWING
--- =========================================================
-
 local function drawCenteredBarText(x1,x2,y,text,filledUntil,filledColor)
     local width=x2-x1+1
     text=shortenText(text,width)
     local textX=x1+math.floor((width-#text)/2)
+
     for index=1,#text do
         local x=textX+index-1
         local bg=theme.progressBackground
@@ -545,6 +510,7 @@ local function drawCenteredBarText(x1,x2,y,text,filledUntil,filledColor)
 end
 
 local function drawProgressBar(card)
+    -- Requested L4.
     local y=card.y1+3
     local x1=card.x1+2
     local x2=card.x2-2
@@ -591,22 +557,41 @@ local function drawCardBorder(card)
 end
 
 local function drawPlaceholder(slot,index)
+    -- L1 + L6 border, L2-L5 empty black, placeholder on L3.
     drawBorder(slot.x1,slot.y1,slot.x2,slot.y2,theme.emptyBorder)
     fill(slot.x1+1,slot.y1+1,slot.x2-1,slot.y2-1,theme.emptyCard)
-    centerInside(slot.x1+1,slot.x2-1,slot.y1+2,"AVAILABLE "..index,theme.placeholderText,theme.emptyCard)
+    centerInside(
+        slot.x1+1,slot.x2-1,slot.y1+2,
+        "AVAILABLE "..index,
+        theme.placeholderText,
+        theme.emptyCard
+    )
 end
 
 local function drawCard(card)
-    drawCardBorder(card)
+    -- Fill interior first, then border so L1/L6 remain pure border.
     fill(card.x1+1,card.y1+1,card.x2-1,card.y2-1,theme.card)
-    centerInside(card.x1+2,card.x2-2,card.y1+1,string.upper(card.name or "STORAGE"),theme.title,theme.card)
-    drawProgressBar(card)
-    drawMachineChase(card)
-end
 
--- =========================================================
--- FOOTER
--- =========================================================
+    -- L2 intentionally empty.
+
+    -- L3 name.
+    centerInside(
+        card.x1+2,
+        card.x2-2,
+        card.y1+2,
+        string.upper(card.name or "STORAGE"),
+        theme.title,
+        theme.card
+    )
+
+    -- L4 progress.
+    drawProgressBar(card)
+
+    -- L5 intentionally empty.
+
+    -- L1/L6 + side borders.
+    drawCardBorder(card)
+end
 
 local function countErrors()
     local count=0
@@ -650,10 +635,6 @@ local function drawFooter()
 
     writeAt(2,height,shortenText(text,width-2),theme.footerText,theme.footer)
 end
-
--- =========================================================
--- REFRESH POPUP
--- =========================================================
 
 local function tableCount(t)
     local c=0
@@ -751,10 +732,6 @@ local function drawRefreshPopup()
     )
 end
 
--- =========================================================
--- FULL SCREEN
--- =========================================================
-
 local function drawScreen()
     rebuildCards()
 
@@ -771,7 +748,10 @@ local function drawScreen()
         local itemID=cardOrder[globalIndex]
         if slot and itemID then
             local card=cards[itemID]
-            card.x1=slot.x1; card.y1=slot.y1; card.x2=slot.x2; card.y2=slot.y2
+            card.x1=slot.x1
+            card.y1=slot.y1
+            card.x2=slot.x2
+            card.y2=slot.y2
             card.borderPoints=slot.borderPoints
             drawCard(card)
         end
@@ -780,17 +760,15 @@ local function drawScreen()
 
     while slotIndex<=cardsPerPage do
         local slot=layoutSlots[slotIndex]
-        if slot then drawPlaceholder(slot,(currentPage-1)*cardsPerPage+slotIndex) end
+        if slot then
+            drawPlaceholder(slot,(currentPage-1)*cardsPerPage+slotIndex)
+        end
         slotIndex=slotIndex+1
     end
 
     drawFooter()
     drawRefreshPopup()
 end
-
--- =========================================================
--- DISCOVERY / REFRESH
--- =========================================================
 
 local function requestDiscovery()
     rednet.broadcast({command="discover"},storageControlProtocol)
@@ -835,10 +813,6 @@ local function rebootComputer()
     os.reboot()
 end
 
--- =========================================================
--- LOOPS
--- =========================================================
-
 local function renderLoop()
     while true do
         updateRefreshState()
@@ -848,7 +822,6 @@ local function renderLoop()
             screenDirty=false
             drawScreen()
         elseif pageCount()>1 and not refresh.visible then
-            -- Redraw header countdown once per render cycle without rebuilding everything.
             drawHeader()
         end
 
@@ -879,14 +852,19 @@ local function animationLoop()
                 local slot=layoutSlots[slotIndex]
 
                 if card and slot then
-                    card.x1=slot.x1; card.y1=slot.y1; card.x2=slot.x2; card.y2=slot.y2
+                    card.x1=slot.x1
+                    card.y1=slot.y1
+                    card.x2=slot.x2
+                    card.y2=slot.y2
                     card.borderPoints=slot.borderPoints
 
                     if card.machineRunning then
                         drawCardBorder(card)
                     elseif flashChanged then
                         local p=calculatePercentage(card)
-                        if hasError(card) or (p and p<25) then drawCardBorder(card) end
+                        if hasError(card) or (p and p<25) then
+                            drawCardBorder(card)
+                        end
                     end
                 end
                 slotIndex=slotIndex+1
@@ -948,10 +926,6 @@ local function eventLoop()
         end
     end
 end
-
--- =========================================================
--- START
--- =========================================================
 
 calculateLayout()
 drawScreen()
