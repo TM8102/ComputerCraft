@@ -105,12 +105,12 @@ return {
     },
     ["mysticalagriculture:dye_essence"] = {
         displayName = "Dye Essence",
-        target = 512000,
+        target = 65500,
 
         machine = {
-            computerID = 202,
+            computerID = 4,
             machineKey = "dye_essence",
-            side = "back",
+            side = "right",
 
             startBelow = 50,
             stopAt = 100
