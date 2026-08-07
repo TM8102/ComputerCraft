@@ -116,7 +116,7 @@ return {
             stopAt = 100
         }
     },
-    ["justdirethings:time_fluid"] = {
+    ["justdirethings:time_fluid_source"] = {
         displayName = "Time Fluid",
         target = 512000,
 
