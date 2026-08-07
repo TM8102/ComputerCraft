@@ -37,7 +37,7 @@ return {
         },
 
         [20] = {
-            front = "N/A",
+            front = "Squid",
             back = "Spiders",
             left = "Ghasts",
             right = "Skeletons"
