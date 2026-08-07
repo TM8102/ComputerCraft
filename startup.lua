@@ -44,6 +44,11 @@ local roles = {
     ["6"] = {
         name = "MOB CONTROL PANEL",
         file = "mob_control_panel.lua"
+    },
+
+    ["7"] = {
+        name = "REMOTE SPAWNER NODE",
+        file = "remote_spawner_node.lua"
     }
 }
 
@@ -99,6 +104,7 @@ local function chooseRole()
         print("4 - Resource Generator")
         print("5 - Time Wand Controller")
         print("6 - Mob Control Panel")
+        print("7 - Remote Spawner Node")
         print("")
         write("Choose role: ")
 
@@ -161,9 +167,7 @@ local function downloadProgram(program)
             "GitHub returned an empty file"
     end
 
-    -- Very small sanity check so an HTML/error response does not
-    -- replace the working Lua program.
-    if string.sub(contents, 1, 1) == "{" 
+    if string.sub(contents, 1, 1) == "{"
         and string.find(contents, '"message"') then
         return false,
             "GitHub returned JSON instead of raw Lua"
@@ -185,7 +189,6 @@ local function downloadProgram(program)
     file.write(contents)
     file.close()
 
-    -- Compile-test the downloaded Lua before replacing the old one.
     local loader, syntaxError = loadfile(tempFile)
 
     if not loader then
