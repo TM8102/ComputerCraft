@@ -1,8 +1,8 @@
 -- =========================================================
 -- REMOTE SPAWNER NODE
 -- Central config: spawners.lua on GitHub.
--- Supports simple side=name profiles, live refresh,
--- maintenance lockout, and status reporting.
+-- Simple format: side = "Mob Name".
+-- "N/A", blank, false, or a missing side = DISABLED.
 -- =========================================================
 
 local controlProtocol = "spawner_control"
@@ -26,7 +26,8 @@ local maintenanceMode = false
 
 local sideOrder = {"front", "back", "left", "right", "top", "bottom"}
 local validSides = {
-    top=true,bottom=true,left=true,right=true,front=true,back=true
+    top=true, bottom=true, left=true,
+    right=true, front=true, back=true
 }
 
 -- =========================================================
@@ -34,7 +35,8 @@ local validSides = {
 -- =========================================================
 
 for _, side in ipairs({"top","bottom","left","right","front","back"}) do
-    if peripheral.isPresent(side) and peripheral.getType(side) == "modem" then
+    if peripheral.isPresent(side)
+        and peripheral.getType(side) == "modem" then
         modemSide = side
         break
     end
@@ -44,46 +46,73 @@ if not modemSide then error("No modem found") end
 rednet.open(modemSide)
 
 -- =========================================================
--- CONFIG HELPERS
+-- HELPERS
 -- =========================================================
 
-local function copyTable(t)
-    local out = {}
-    for k,v in pairs(t or {}) do
-        out[k] = type(v) == "table" and copyTable(v) or v
+local function trim(value)
+    value = tostring(value or "")
+    return (value:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function isDisabledName(value)
+    if value == nil or value == false then return true end
+    if type(value) ~= "string" then return false end
+
+    local name = trim(value)
+    if name == "" then return true end
+
+    local upper = string.upper(name)
+    return upper == "N/A"
+        or upper == "NA"
+        or upper == "NONE"
+        or upper == "DISABLED"
+end
+
+local function copyTable(source)
+    local result = {}
+    for key, value in pairs(source or {}) do
+        result[key] = type(value) == "table"
+            and copyTable(value)
+            or value
     end
-    return out
+    return result
 end
 
 local function makeKey(side)
     return "side_" .. tostring(side)
 end
 
+-- New simple format:
+-- [26] = {
+--     front = "Spider",
+--     back  = "N/A", -- disabled
+-- }
 local function simpleProfileToList(profile)
     local list = {}
 
     for _, side in ipairs(sideOrder) do
         local value = profile[side]
+        local name
+        local enabled = true
 
-        if value ~= nil and value ~= false then
-            local name
-            local enabled = true
+        if type(value) == "string" then
+            name = trim(value)
+            enabled = not isDisabledName(name)
+        elseif type(value) == "table" then
+            name = trim(value.name or value.displayName)
+            enabled = value.enabled ~= false
+                and not isDisabledName(name)
+        elseif value == false or value == nil then
+            enabled = false
+        end
 
-            if type(value) == "string" then
-                name = value
-            elseif type(value) == "table" then
-                name = value.name or value.displayName
-                enabled = value.enabled ~= false
-            end
-
-            if enabled and type(name) == "string" and name ~= "" then
-                list[#list + 1] = {
-                    key = makeKey(side),
-                    name = name,
-                    outputSide = side,
-                    enabled = true
-                }
-            end
+        if enabled and name and name ~= "" then
+            list[#list + 1] = {
+                key = makeKey(side),
+                name = name,
+                outputSide = side,
+                enabled = true
+            }
         end
     end
 
@@ -95,12 +124,23 @@ local function normalizeProfile(profile)
         return nil, "Spawner profile must be a table"
     end
 
-    -- Backwards compatibility with the older verbose format.
+    -- Backwards compatibility with older verbose config.
     if type(profile.spawners) == "table" then
-        return copyTable(profile.spawners)
+        local result = {}
+
+        for _, entry in ipairs(copyTable(profile.spawners)) do
+            local name = trim(entry.name or entry.displayName)
+
+            if entry.enabled ~= false
+                and not isDisabledName(name) then
+                entry.name = name
+                result[#result + 1] = entry
+            end
+        end
+
+        return result
     end
 
-    -- New simple format: front="Spider", back="Zombie", etc.
     return simpleProfileToList(profile)
 end
 
@@ -109,45 +149,41 @@ local function validateSpawnerList(list)
         return false, "Spawner list must be a table"
     end
 
-    local keys, sides = {}, {}
+    local usedKeys = {}
+    local usedSides = {}
 
-    for i, s in ipairs(list) do
-        if type(s) ~= "table" then
-            return false, "Bad spawner entry " .. tostring(i)
+    for index, spawner in ipairs(list) do
+        if type(spawner) ~= "table" then
+            return false, "Bad spawner entry " .. tostring(index)
         end
 
-        s.enabled = s.enabled ~= false
-
-        if s.enabled then
-            if type(s.key) ~= "string" or s.key == "" then
-                return false, "Spawner " .. tostring(i) .. " needs a key"
-            end
-
-            if keys[s.key] then
-                return false, "Duplicate key: " .. s.key
-            end
-            keys[s.key] = true
-
-            if type(s.name) ~= "string" or s.name == "" then
-                return false, "Spawner " .. s.key .. " needs a name"
-            end
-
-            if not validSides[s.outputSide] then
-                return false, "Bad output side for " .. s.key
-            end
-
-            if s.outputSide == modemSide then
-                return false,
-                    s.key .. " cannot use modem side " .. modemSide
-            end
-
-            if sides[s.outputSide] then
-                return false,
-                    "Two enabled spawners use " .. s.outputSide
-            end
-
-            sides[s.outputSide] = true
+        if type(spawner.key) ~= "string" or spawner.key == "" then
+            return false, "Spawner " .. tostring(index) .. " needs a key"
         end
+
+        if usedKeys[spawner.key] then
+            return false, "Duplicate key: " .. spawner.key
+        end
+        usedKeys[spawner.key] = true
+
+        if type(spawner.name) ~= "string" or spawner.name == "" then
+            return false, "Spawner " .. spawner.key .. " needs a name"
+        end
+
+        if not validSides[spawner.outputSide] then
+            return false, "Bad output side for " .. spawner.key
+        end
+
+        if spawner.outputSide == modemSide then
+            return false,
+                spawner.key .. " cannot use modem side " .. modemSide
+        end
+
+        if usedSides[spawner.outputSide] then
+            return false,
+                "Two enabled spawners use " .. spawner.outputSide
+        end
+        usedSides[spawner.outputSide] = true
     end
 
     return true
@@ -169,23 +205,15 @@ local function selectComputerConfig(config)
     end
 
     if not profile then
-        profile = config.default
+        profile = config.default or {}
         profileName = "DEFAULT"
     end
 
-    if type(profile) ~= "table" then
-        return nil, "No profile for computer " .. computerID
-    end
-
     local configured, normalizeError = normalizeProfile(profile)
-    if not configured then
-        return nil, normalizeError
-    end
+    if not configured then return nil, normalizeError end
 
-    local ok, err = validateSpawnerList(configured)
-    if not ok then
-        return nil, err
-    end
+    local valid, validationError = validateSpawnerList(configured)
+    if not valid then return nil, validationError end
 
     return {
         spawners = configured,
@@ -196,25 +224,21 @@ local function selectComputerConfig(config)
 end
 
 local function allPhysicalOff(list)
-    for _, s in ipairs(list or {}) do
-        if s.enabled
-            and validSides[s.outputSide]
-            and s.outputSide ~= modemSide then
-
-            redstone.setOutput(s.outputSide, false)
+    for _, spawner in ipairs(list or {}) do
+        if validSides[spawner.outputSide]
+            and spawner.outputSide ~= modemSide then
+            redstone.setOutput(spawner.outputSide, false)
         end
     end
 end
 
 local function applyConfig(config, source)
-    local selected, err = selectComputerConfig(config)
-    if not selected then return false, err end
+    local selected, selectionError = selectComputerConfig(config)
+    if not selected then return false, selectionError end
 
     local oldStates = {}
-    for _, s in ipairs(spawners) do
-        if s.enabled and s.key then
-            oldStates[s.key] = s.state == true
-        end
+    for _, spawner in ipairs(spawners) do
+        oldStates[spawner.key] = spawner.state == true
     end
 
     allPhysicalOff(spawners)
@@ -224,11 +248,12 @@ local function applyConfig(config, source)
     configUpdateInterval = selected.configUpdateInterval
     configSource = source .. " / " .. selected.profileName
 
-    for _, s in ipairs(spawners) do
-        s.state = (not maintenanceMode) and oldStates[s.key] == true or false
-        if s.enabled then
-            redstone.setOutput(s.outputSide, s.state)
-        end
+    for _, spawner in ipairs(spawners) do
+        spawner.state = not maintenanceMode
+            and oldStates[spawner.key] == true
+            or false
+
+        redstone.setOutput(spawner.outputSide, spawner.state)
     end
 
     return true
@@ -237,10 +262,10 @@ end
 local function installConfig(contents, source)
     if fs.exists(tempConfigFile) then fs.delete(tempConfigFile) end
 
-    local f = fs.open(tempConfigFile, "w")
-    if not f then return false, "Could not write temporary config" end
-    f.write(contents)
-    f.close()
+    local file = fs.open(tempConfigFile, "w")
+    if not file then return false, "Could not write temporary config" end
+    file.write(contents)
+    file.close()
 
     local ok, config = pcall(dofile, tempConfigFile)
     if not ok then
@@ -248,10 +273,10 @@ local function installConfig(contents, source)
         return false, "CONFIG ERROR: " .. tostring(config)
     end
 
-    local applied, err = applyConfig(config, source)
+    local applied, applyError = applyConfig(config, source)
     if not applied then
         fs.delete(tempConfigFile)
-        return false, err
+        return false, applyError
     end
 
     if fs.exists(configFile) then fs.delete(configFile) end
@@ -260,20 +285,27 @@ local function installConfig(contents, source)
 end
 
 local function downloadConfig()
-    local url = githubConfigURL .. "&cb=" .. tostring(os.epoch("utc"))
+    local url = githubConfigURL
+        .. "&cb="
+        .. tostring(os.epoch("utc"))
 
-    local r, err = http.get(url, {
+    local response, httpError = http.get(url, {
         ["User-Agent"] = "CC-Tweaked",
         ["Accept"] = "application/vnd.github.raw+json",
         ["Cache-Control"] = "no-cache, no-store",
         ["Pragma"] = "no-cache"
     })
 
-    if not r then return false, "GitHub API failed: " .. tostring(err) end
+    if not response then
+        return false, "GitHub API failed: " .. tostring(httpError)
+    end
 
-    local code = r.getResponseCode and r.getResponseCode() or 200
-    local contents = r.readAll()
-    r.close()
+    local code = response.getResponseCode
+        and response.getResponseCode()
+        or 200
+
+    local contents = response.readAll()
+    response.close()
 
     if code < 200 or code >= 300 then
         return false, "GitHub HTTP " .. tostring(code)
@@ -302,26 +334,26 @@ end
 -- =========================================================
 
 local function findSpawner(key)
-    for _, s in ipairs(spawners) do
-        if s.enabled and s.key == key then return s end
+    for _, spawner in ipairs(spawners) do
+        if spawner.key == key then return spawner end
     end
 end
 
-local function setSpawnerState(s, state)
-    if not s or not s.enabled then return false end
+local function setSpawnerState(spawner, state)
+    if not spawner then return false end
 
     if maintenanceMode and state == true then
         state = false
     end
 
-    s.state = state == true
-    redstone.setOutput(s.outputSide, s.state)
+    spawner.state = state == true
+    redstone.setOutput(spawner.outputSide, spawner.state)
     return true
 end
 
 local function turnEverythingOff()
-    for _, s in ipairs(spawners) do
-        if s.enabled then setSpawnerState(s, false) end
+    for _, spawner in ipairs(spawners) do
+        setSpawnerState(spawner, false)
     end
 end
 
@@ -331,8 +363,8 @@ local function turnEverythingOn()
         return false
     end
 
-    for _, s in ipairs(spawners) do
-        if s.enabled then setSpawnerState(s, true) end
+    for _, spawner in ipairs(spawners) do
+        setSpawnerState(spawner, true)
     end
 
     return true
@@ -344,8 +376,8 @@ end
 
 local function sendManifest()
     local keys = {}
-    for _, s in ipairs(spawners) do
-        if s.enabled then keys[#keys + 1] = s.key end
+    for _, spawner in ipairs(spawners) do
+        keys[#keys + 1] = spawner.key
     end
 
     rednet.broadcast({
@@ -359,15 +391,13 @@ local function sendManifest()
     }, statusProtocol)
 end
 
-local function sendSpawnerStatus(s)
-    if not s.enabled then return end
-
+local function sendSpawnerStatus(spawner)
     rednet.broadcast({
         messageType = "spawner_status",
-        spawnerKey = s.key,
-        displayName = s.name,
-        state = s.state == true,
-        outputSide = s.outputSide,
+        spawnerKey = spawner.key,
+        displayName = spawner.name,
+        state = spawner.state == true,
+        outputSide = spawner.outputSide,
         role = "REMOTE_SPAWNER",
         computerID = computerID,
         configSource = configSource,
@@ -377,9 +407,12 @@ local function sendSpawnerStatus(s)
 end
 
 local function sendAllStatuses()
+    -- The manifest is important: if a side changed to N/A,
+    -- it is absent here and the control panel deletes its old card.
     sendManifest()
-    for _, s in ipairs(spawners) do
-        if s.enabled then sendSpawnerStatus(s) end
+
+    for _, spawner in ipairs(spawners) do
+        sendSpawnerStatus(spawner)
     end
 end
 
@@ -408,7 +441,9 @@ local function drawScreen()
 
     print("REMOTE SPAWNER NODE")
     print("===================")
-    print("Computer ID: " .. computerID)
+    term.setTextColor(colors.cyan)
+    print("COMPUTER ID: " .. computerID)
+    term.setTextColor(colors.white)
     print("Modem: " .. string.upper(modemSide))
     print("Config: " .. configSource)
 
@@ -424,18 +459,18 @@ local function drawScreen()
 
     if #spawners == 0 then
         term.setTextColor(colors.orange)
-        print("NO SPAWNERS CONFIGURED")
+        print("NO ACTIVE SPAWNERS")
+        print("Add COMPUTER ID " .. computerID)
+        print("to spawners.lua, then REFRESH.")
         term.setTextColor(colors.white)
     end
 
-    for i, s in ipairs(spawners) do
-        if s.enabled then
-            print(i .. ". " .. s.name)
-            print("   Side: " .. string.upper(s.outputSide))
-            term.setTextColor(s.state and colors.lime or colors.red)
-            print("   " .. (s.state and "ON" or "OFF"))
-            term.setTextColor(colors.white)
-        end
+    for index, spawner in ipairs(spawners) do
+        print(index .. ". " .. spawner.name)
+        print("   Side: " .. string.upper(spawner.outputSide))
+        term.setTextColor(spawner.state and colors.lime or colors.red)
+        print("   " .. (spawner.state and "ON" or "OFF"))
+        term.setTextColor(colors.white)
     end
 end
 
@@ -490,10 +525,10 @@ local function networkLoop()
                     and type(message.spawnerKey) == "string"
                     and type(message.state) == "boolean" then
 
-                    local s = findSpawner(message.spawnerKey)
-                    if s then
-                        setSpawnerState(s, message.state)
-                        sendSpawnerStatus(s)
+                    local spawner = findSpawner(message.spawnerKey)
+                    if spawner then
+                        setSpawnerState(spawner, message.state)
+                        sendSpawnerStatus(spawner)
                         drawScreen()
                     end
                 end
@@ -501,14 +536,14 @@ local function networkLoop()
             elseif protocol == configControlProtocol
                 and message.command == "force_spawners_refresh" then
 
-                local success, err = downloadConfig()
+                local success, refreshError = downloadConfig()
                 if maintenanceMode then turnEverythingOff() end
 
                 if success then
                     sendAllStatuses()
                     sendRefreshStatus(true, nil)
                 else
-                    sendRefreshStatus(false, err)
+                    sendRefreshStatus(false, refreshError)
                 end
 
                 drawScreen()
@@ -530,14 +565,14 @@ local function configLoop()
     while true do
         sleep(configUpdateInterval)
 
-        local success, err = downloadConfig()
+        local success, configError = downloadConfig()
         if maintenanceMode then turnEverythingOff() end
 
         if success then
             sendAllStatuses()
             drawScreen()
         else
-            print("Spawner config update failed: " .. tostring(err))
+            print("Spawner config update failed: " .. tostring(configError))
         end
     end
 end
