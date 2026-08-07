@@ -1,7 +1,7 @@
 -- =========================================================
 -- MOB CONTROL PANEL
--- Reliable maintenance lockout/unlock, wide controls with a
--- one-line row gap, Pink Slime override, refresh/debug, fans.
+-- Reliable maintenance lockout/unlock, debounced touch input,
+-- wide controls, Pink Slime override, refresh/debug, fans.
 -- =========================================================
 
 local monitorSide = "right"
@@ -28,6 +28,7 @@ local fanShutdownSeconds = 30
 local refreshWaitSeconds = 5
 local refreshResultSeconds = 10
 local unlockReassertSeconds = 4
+local maintenanceDebounceSeconds = 1.25
 
 local monitor = peripheral.wrap(monitorSide)
 if not monitor then error("No monitor found on " .. monitorSide) end
@@ -65,6 +66,8 @@ local pinkSlimeAutomationActive = false
 local pinkSlimeSnapshot = nil
 local maintenanceMode = false
 local maintenanceUnlockUntil = 0
+local maintenanceInputLocked = false
+local maintenanceDebounceTimer = nil
 
 local refresh = {visible=false,running=false,started=0,finishedAt=0,expected={},responses={}}
 
@@ -220,10 +223,10 @@ local function calculateLayout()
     local x3=x2+gap+1; local x4=x3+bw-1
     local x5=x4+gap+1; local x6=width-margin
 
-    -- One full blank line (Y=5) between the two button rows.
     buttons.masterOn={x1=x1,x2=x2,y1=2,y2=4}
     buttons.masterOff={x1=x3,x2=x4,y1=2,y2=4}
     buttons.fans={x1=x5,x2=x6,y1=2,y2=4}
+    -- Y=5 is the full blank line between button rows.
     buttons.maintenance={x1=x1,x2=x2,y1=6,y2=8}
     buttons.refresh={x1=x3,x2=x4,y1=6,y2=8}
     buttons.reboot={x1=x5,x2=x6,y1=6,y2=8}
@@ -265,9 +268,13 @@ local function drawFanButton()
 end
 
 local function drawMaintenanceButton()
-    drawButton(buttons.maintenance,
-        maintenanceMode and "MAINTENANCE: ON" or "MAINTENANCE: OFF",
-        maintenanceMode and theme.maintenanceOn or theme.maintenanceOff)
+    local text
+    if maintenanceInputLocked then
+        text=maintenanceMode and "MAINTENANCE: ON" or "MAINTENANCE: OFF"
+    else
+        text=maintenanceMode and "MAINTENANCE: ON" or "MAINTENANCE: OFF"
+    end
+    drawButton(buttons.maintenance,text,maintenanceMode and theme.maintenanceOn or theme.maintenanceOff)
 end
 
 local function drawHeader()
@@ -285,7 +292,6 @@ local function drawHeader()
     drawButton(buttons.refresh,refresh.running and "REFRESHING..." or "REFRESH SPAWNERS",
         refresh.running and theme.refreshPressed or theme.refresh)
     drawButton(buttons.reboot,"REBOOT PANEL",theme.reboot)
-    -- Y=5 remains the requested blank gap between button rows.
     fill(1,10,width,10,theme.accent)
 end
 
@@ -399,39 +405,53 @@ local function setAllSpawners(state)
     end
 end
 
+local function markAllSpawnersOff()
+    for _,s in ipairs(spawners) do
+        if s.computerID~=0 then s.state=false end
+    end
+end
+
 local function masterOn()
-    if maintenanceMode then setAllSpawners(false); setFans(false); return end
+    if maintenanceMode then return end
     cancelFanShutdown(); setFans(true); setAllSpawners(true)
     rednet.broadcast({command="all_on"},controlProtocol)
     drawHeader(); drawFooter()
 end
 
 local function masterOff()
-    setAllSpawners(false); rednet.broadcast({command="all_off"},controlProtocol)
-    if maintenanceMode then cancelFanShutdown(); setFans(false)
+    markAllSpawnersOff(); rednet.broadcast({command="all_off"},controlProtocol)
+    if maintenanceMode then cancelFanShutdown(); fansState=false; sendFansState()
     else
         fansState=true; sendFansState(); fanShutdownRemaining=fanShutdownSeconds; fanShutdownTimer=os.startTimer(1)
     end
-    drawHeader(); drawFooter()
+    drawScreen()
 end
 
 local function toggleFans()
-    if maintenanceMode then cancelFanShutdown(); setFans(false); return end
+    if maintenanceMode then return end
     cancelFanShutdown(); setFans(not fansState)
 end
 
 local function sendMaintenanceState(state)
     local message={command="maintenance",state=state==true,timestamp=now()}
     rednet.broadcast(message,controlProtocol)
-    -- Also address every known node directly. This makes unlock far
-    -- less dependent on a single broadcast packet being received.
     for id in pairs(knownNodes) do rednet.send(id,message,controlProtocol) end
 end
 
 local function applyMaintenanceLockout()
-    cancelFanShutdown(); pinkSlimeAutomationActive=false; pinkSlimeSnapshot=nil
-    setAllSpawners(false); rednet.broadcast({command="all_off"},controlProtocol)
-    fansState=false; sendFansState(); sendMaintenanceState(true)
+    cancelFanShutdown()
+    pinkSlimeAutomationActive=false
+    pinkSlimeSnapshot=nil
+    markAllSpawnersOff()
+    fansState=false
+
+    -- Update the screen BEFORE doing network work so the first tap gives
+    -- immediate visible feedback instead of encouraging repeated taps.
+    drawScreen()
+
+    rednet.broadcast({command="all_off"},controlProtocol)
+    sendFansState()
+    sendMaintenanceState(true)
 end
 
 local function setMaintenance(state)
@@ -444,27 +464,34 @@ local function setMaintenance(state)
     maintenanceMode=state
     saveMaintenance()
 
+    -- Draw immediately. This is intentionally before rednet sends.
+    drawHeader()
+    drawFooter()
+
     if maintenanceMode then
         maintenanceUnlockUntil=0
         applyMaintenanceLockout()
     else
-        -- Unlock is deliberately reasserted for several seconds so a
-        -- remote node cannot stay stuck in maintenance after one lost packet.
         maintenanceUnlockUntil=now()+unlockReassertSeconds*1000
         pinkSlimeAutomationActive=false
         pinkSlimeSnapshot=nil
         cancelFanShutdown()
-        setAllSpawners(false)
-        fansState=false; sendFansState()
+        markAllSpawnersOff()
+        fansState=false
+
+        -- Show OFF immediately, then tell every node.
+        drawScreen()
+
+        sendFansState()
         sendMaintenanceState(false)
         rednet.broadcast({command="all_off"},controlProtocol)
         rednet.broadcast({command="discover"},controlProtocol)
     end
-
-    drawScreen()
 end
 
-local function toggleMaintenance() setMaintenance(not maintenanceMode) end
+local function toggleMaintenance()
+    setMaintenance(not maintenanceMode)
+end
 
 local function stateKey(s) return tostring(s.computerID)..":"..tostring(s.spawnerKey) end
 
@@ -486,7 +513,11 @@ end
 
 local function setPinkAutomation(requested)
     requested=requested==true
-    if maintenanceMode then pinkSlimeAutomationActive=false; pinkSlimeSnapshot=nil; applyMaintenanceLockout(); return end
+    if maintenanceMode then
+        pinkSlimeAutomationActive=false
+        pinkSlimeSnapshot=nil
+        return
+    end
     if requested and not pinkSlimeAutomationActive then
         pinkSlimeSnapshot=capturePinkSnapshot(); pinkSlimeAutomationActive=true; masterOn()
     elseif not requested and pinkSlimeAutomationActive then
@@ -502,8 +533,13 @@ end
 
 local function requestDiscovery()
     rednet.broadcast({command="discover"},controlProtocol)
-    if maintenanceMode then sendMaintenanceState(true); rednet.broadcast({command="all_off"},controlProtocol); fansState=false; sendFansState()
-    elseif maintenanceUnlockUntil>now() then sendMaintenanceState(false) end
+    if maintenanceMode then
+        sendMaintenanceState(true)
+        rednet.broadcast({command="all_off"},controlProtocol)
+        fansState=false; sendFansState()
+    elseif maintenanceUnlockUntil>now() then
+        sendMaintenanceState(false)
+    end
 end
 
 local function processManifest(senderID,m)
@@ -529,8 +565,6 @@ local function processSpawnerStatus(senderID,m)
         if s.state then s.state=false; sendSpawnerState(s) end
         rednet.send(senderID,{command="maintenance",state=true,timestamp=now()},controlProtocol)
     else
-        -- If this node reports it is still locked after the panel was
-        -- unlocked, immediately send a direct unlock again.
         if m.maintenance==true or maintenanceUnlockUntil>now() then
             rednet.send(senderID,{command="maintenance",state=false,timestamp=now()},controlProtocol)
         end
@@ -615,10 +649,15 @@ while true do
     if event=="monitor_touch" and a==monitorName then
         local x,y=b,c
 
-        -- MAINTENANCE IS ALWAYS CLICKABLE, even while the refresh popup
-        -- is visible. This fixes the previous intermittent-looking lockout.
+        -- Maintenance always works, even while refresh/debug is open.
+        -- The lock prevents several rapid taps from queueing up and
+        -- toggling ON/OFF repeatedly after the first tap finally renders.
         if inside(x,y,buttons.maintenance) then
-            toggleMaintenance()
+            if not maintenanceInputLocked then
+                maintenanceInputLocked=true
+                maintenanceDebounceTimer=os.startTimer(maintenanceDebounceSeconds)
+                toggleMaintenance()
+            end
 
         elseif not refresh.visible then
             if inside(x,y,buttons.masterOn) then masterOn()
@@ -643,13 +682,21 @@ while true do
         elseif protocol==configStatusProtocol and type(message)=="table" then processRefreshStatus(senderID,message)
         elseif protocol==machineStatusProtocol and type(message)=="table" then processMachineStatus(message) end
 
+    elseif event=="timer" and maintenanceDebounceTimer and a==maintenanceDebounceTimer then
+        maintenanceInputLocked=false
+        maintenanceDebounceTimer=nil
+        drawMaintenanceButton()
+
     elseif event=="timer" and a==animationTimer then
         animationFrame=animationFrame+1
         if not refresh.visible then for i,s in ipairs(spawners) do if s.computerID~=0 then drawSpawner(s,i) end end end
         animationTimer=os.startTimer(animationSpeed)
 
     elseif event=="timer" and a==offlineTimer then
-        if maintenanceMode then applyMaintenanceLockout() end
+        if maintenanceMode then
+            rednet.broadcast({command="all_off"},controlProtocol)
+            sendMaintenanceState(true)
+        end
         updateOffline(); offlineTimer=os.startTimer(2)
 
     elseif event=="timer" and a==discoveryTimer then
@@ -667,7 +714,7 @@ while true do
         maintenanceTimer=os.startTimer(0.5)
 
     elseif event=="timer" and fanShutdownTimer and a==fanShutdownTimer then
-        if maintenanceMode then cancelFanShutdown(); setFans(false)
+        if maintenanceMode then cancelFanShutdown(); fansState=false; sendFansState()
         else
             fanShutdownRemaining=math.max(0,fanShutdownRemaining-1)
             if fanShutdownRemaining>0 then fanShutdownTimer=os.startTimer(1)
