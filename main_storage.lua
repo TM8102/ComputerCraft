@@ -17,7 +17,6 @@ local machineControlProtocol =
 local machineStatusProtocol =
     "resource_machine_status"
 
--- NEW
 local configControlProtocol =
     "config_control"
 
@@ -41,8 +40,11 @@ local discoveryInterval = 5
 
 local renderInterval = 0.20
 
--- How long the refresh-status message remains in header.
-local refreshMessageSeconds = 8
+-- How long to wait for refresh replies.
+local refreshWaitSeconds = 5
+
+-- How long final refresh results stay visible.
+local refreshResultSeconds = 10
 
 -- =========================================================
 -- ANIMATION
@@ -50,6 +52,7 @@ local refreshMessageSeconds = 8
 
 local animationSpeed = 0.12
 local flashInterval = 0.48
+
 local chaseLength = 6
 
 local chaseFrame = 0
@@ -58,7 +61,7 @@ local flashState = false
 local flashElapsed = 0
 
 -- =========================================================
--- DIRTY RENDER
+-- RENDER STATE
 -- =========================================================
 
 local screenDirty = true
@@ -141,7 +144,7 @@ local theme = {
     amountText =
         colors.white,
 
-    -- Storage levels
+    -- Storage
     full =
         colors.lime,
 
@@ -207,8 +210,24 @@ local theme = {
     refreshPressed =
         colors.lime,
 
-    refreshFailure =
+    -- Popup
+    popupBackground =
+        colors.gray,
+
+    popupBorder =
+        colors.lightGray,
+
+    popupTitle =
+        colors.cyan,
+
+    success =
+        colors.lime,
+
+    failure =
         colors.red,
+
+    pending =
+        colors.orange,
 
     -- Footer
     footer =
@@ -219,7 +238,7 @@ local theme = {
 }
 
 -- =========================================================
--- DATA
+-- STORAGE DATA
 -- =========================================================
 
 local storageSources = {}
@@ -232,32 +251,120 @@ local cardOrder = {}
 
 local layoutSlots = {}
 
-local rebootButton = {}
+-- =========================================================
+-- BUTTONS
+-- =========================================================
 
+local rebootButton = {}
 local refreshButton = {}
 
 -- =========================================================
--- REFRESH STATUS
+-- KNOWN COMPUTERS
+--
+-- Anything sending storage or machine status gets tracked.
+-- This lets refresh know how many computers should answer.
 -- =========================================================
 
-local refreshStatus = {
-    active = false,
+local knownComputers = {}
 
-    started =
-        0,
+local function rememberComputer(
+    computerID,
+    role
+)
+    if not knownComputers[
+        computerID
+    ] then
 
-    successCount =
-        0,
+        knownComputers[
+            computerID
+        ] = {
+            role =
+                role
+                or "NODE",
 
-    failureCount =
-        0,
+            lastSeen =
+                os.epoch(
+                    "utc"
+                )
+        }
 
-    lastMessage =
-        "",
+    else
+        knownComputers[
+            computerID
+        ].lastSeen =
+            os.epoch(
+                "utc"
+            )
 
-    lastComputer =
-        nil
+        if role then
+            knownComputers[
+                computerID
+            ].role =
+                role
+        end
+    end
+end
+
+-- =========================================================
+-- REFRESH STATE
+-- =========================================================
+
+local refresh = {
+    visible = false,
+
+    running = false,
+
+    started = 0,
+
+    finishedAt = 0,
+
+    responses = {},
+
+    expected = {}
 }
+
+local function resetRefresh()
+    refresh.visible = true
+    refresh.running = true
+
+    refresh.started =
+        os.epoch(
+            "utc"
+        )
+
+    refresh.finishedAt = 0
+
+    refresh.responses = {}
+    refresh.expected = {}
+
+    local now =
+        os.epoch(
+            "utc"
+        )
+
+    for computerID, info
+        in pairs(
+            knownComputers
+        ) do
+
+        local age =
+            now
+            - (
+                info.lastSeen
+                or 0
+            )
+
+        -- Only expect computers seen recently.
+        if age
+            <= sourceOfflineSeconds
+                * 1000 then
+
+            refresh.expected[
+                computerID
+            ] = true
+        end
+    end
+end
 
 -- =========================================================
 -- DRAW HELPERS
@@ -281,6 +388,7 @@ local function fill(
     )
 
     for y = y1, y2 do
+
         monitor.setCursorPos(
             x1,
             y
@@ -328,7 +436,8 @@ local function shortenText(
 )
     text =
         tostring(
-            text or ""
+            text
+            or ""
         )
 
     if maxLength <= 0 then
@@ -340,6 +449,7 @@ local function shortenText(
     end
 
     if maxLength <= 3 then
+
         return string.sub(
             text,
             1,
@@ -473,6 +583,7 @@ local function getBorderPoints(
     local points = {}
 
     for x = x1, x2 do
+
         points[
             #points + 1
         ] = {
@@ -528,14 +639,19 @@ local function commaNumber(
 )
     number =
         math.floor(
-            tonumber(number)
+            tonumber(
+                number
+            )
             or 0
         )
 
     local text =
-        tostring(number)
+        tostring(
+            number
+        )
 
     while true do
+
         local formatted,
             replacements =
             string.gsub(
@@ -556,7 +672,7 @@ local function commaNumber(
 end
 
 -- =========================================================
--- STORAGE SOURCES
+-- STORAGE SOURCE
 -- =========================================================
 
 local function ensureStorageSource(
@@ -577,13 +693,19 @@ local function ensureStorageSource(
 end
 
 -- =========================================================
--- MANIFEST
+-- STORAGE MANIFEST
 -- =========================================================
 
 local function processStorageManifest(
     senderID,
     message
 )
+    rememberComputer(
+        senderID,
+        message.role
+        or "STORAGE"
+    )
+
     if type(
         message.enabledKeys
     ) ~= "table" then
@@ -593,8 +715,7 @@ local function processStorageManifest(
 
     local enabled = {}
 
-    for _,
-        itemID
+    for _, itemID
         in ipairs(
             message.enabledKeys
         ) do
@@ -614,9 +735,6 @@ local function processStorageManifest(
             senderID
         )
 
-    local changed =
-        false
-
     for itemID
         in pairs(
             source
@@ -630,16 +748,10 @@ local function processStorageManifest(
                 itemID
             ] =
                 nil
-
-            changed =
-                true
         end
     end
 
-    if changed then
-        screenDirty =
-            true
-    end
+    screenDirty = true
 end
 
 -- =========================================================
@@ -650,6 +762,12 @@ local function processInventoryUpdate(
     senderID,
     message
 )
+    rememberComputer(
+        senderID,
+        message.role
+        or "STORAGE"
+    )
+
     local itemID =
         message.itemID
         or message.storageKey
@@ -678,13 +796,15 @@ local function processInventoryUpdate(
         amount =
             tonumber(
                 message.amount
-            ) or 0,
+            )
+            or 0,
 
         targetAmount =
             tonumber(
                 message.targetAmount
                 or message.target
-            ) or 0,
+            )
+            or 0,
 
         found =
             message.found
@@ -703,8 +823,7 @@ local function processInventoryUpdate(
             )
     }
 
-    screenDirty =
-        true
+    screenDirty = true
 end
 
 -- =========================================================
@@ -715,6 +834,12 @@ local function processMachineStatus(
     senderID,
     message
 )
+    rememberComputer(
+        senderID,
+        message.role
+        or "NODE"
+    )
+
     if type(
         message.itemID
     ) ~= "string" then
@@ -744,52 +869,60 @@ local function processMachineStatus(
             )
     }
 
-    screenDirty =
-        true
+    screenDirty = true
 end
 
 -- =========================================================
--- CONFIG REFRESH ACK
+-- REFRESH RESPONSE
 -- =========================================================
 
-local function processConfigStatus(
+local function processRefreshStatus(
     senderID,
     message
 )
+    rememberComputer(
+        senderID,
+        message.role
+        or "NODE"
+    )
+
     if message.command
         ~= "targets_refresh_status" then
 
         return
     end
 
-    refreshStatus.active =
-        true
+    refresh.visible = true
 
-    refreshStatus.lastComputer =
+    refresh.responses[
         senderID
+    ] = {
+        success =
+            message.success
+            == true,
 
-    if message.success then
-        refreshStatus.successCount =
-            refreshStatus.successCount
-            + 1
+        error =
+            message.error,
 
-        refreshStatus.lastMessage =
-            "Computer "
-            .. senderID
-            .. " updated"
-    else
-        refreshStatus.failureCount =
-            refreshStatus.failureCount
-            + 1
+        role =
+            message.role
+            or (
+                knownComputers[
+                    senderID
+                ]
+                and knownComputers[
+                    senderID
+                ].role
+            )
+            or "NODE",
 
-        refreshStatus.lastMessage =
-            "Computer "
-            .. senderID
-            .. " FAILED"
-    end
+        timestamp =
+            os.epoch(
+                "utc"
+            )
+    }
 
-    screenDirty =
-        true
+    screenDirty = true
 end
 
 -- =========================================================
@@ -833,12 +966,14 @@ local function rebuildCards()
                     nil
 
             else
+
                 local card =
                     combined[
                         itemID
                     ]
 
                 if not card then
+
                     card = {
                         itemID =
                             itemID,
@@ -847,26 +982,15 @@ local function rebuildCards()
                             data.displayName
                             or itemID,
 
-                        amount =
-                            0,
+                        amount = 0,
 
-                        targetAmount =
-                            0,
+                        targetAmount = 0,
 
-                        found =
-                            true,
+                        found = true,
 
-                        online =
-                            false,
+                        online = false,
 
-                        error =
-                            nil,
-
-                        sourceCount =
-                            0,
-
-                        onlineSources =
-                            0,
+                        error = nil,
 
                         machineRunning =
                             false,
@@ -890,7 +1014,8 @@ local function rebuildCards()
                     + (
                         tonumber(
                             data.amount
-                        ) or 0
+                        )
+                        or 0
                     )
 
                 if tonumber(
@@ -914,26 +1039,16 @@ local function rebuildCards()
                         data.displayName
                 end
 
-                card.sourceCount =
-                    card.sourceCount
-                    + 1
-
                 if age
                         <= sourceOfflineSeconds
                             * 1000
                     and data.online then
 
-                    card.online =
-                        true
-
-                    card.onlineSources =
-                        card.onlineSources
-                        + 1
+                    card.online = true
                 end
 
                 if not data.found then
-                    card.found =
-                        false
+                    card.found = false
                 end
 
                 if data.error
@@ -946,10 +1061,6 @@ local function rebuildCards()
             end
         end
     end
-
-    -- =====================================================
-    -- MACHINE STATES
-    -- =====================================================
 
     for itemID,
         machine
@@ -985,8 +1096,7 @@ local function rebuildCards()
         end
     end
 
-    cards =
-        combined
+    cards = combined
 
     cardOrder = {}
 
@@ -1004,6 +1114,7 @@ local function rebuildCards()
     table.sort(
         cardOrder,
         function(a, b)
+
             return string.lower(
                 cards[a].name
                 or a
@@ -1041,24 +1152,21 @@ local function calculatePercentage(
     end
 
     local percentage =
-        (
-            amount
-            / target
-        ) * 100
+        amount
+        / target
+        * 100
 
-    if percentage < 0 then
-        percentage = 0
-    end
-
-    if percentage > 100 then
-        percentage = 100
-    end
-
-    return percentage
+    return math.max(
+        0,
+        math.min(
+            100,
+            percentage
+        )
+    )
 end
 
 -- =========================================================
--- ERROR
+-- ERRORS
 -- =========================================================
 
 local function hasError(
@@ -1130,15 +1238,11 @@ end
 local function getBorderColor(
     card
 )
-    if hasError(
-        card
-    ) then
+    if hasError(card) then
 
-        if flashState then
-            return theme.errorRed
-        else
-            return theme.errorOrange
-        end
+        return flashState
+            and theme.errorRed
+            or theme.errorOrange
     end
 
     local percentage =
@@ -1147,19 +1251,17 @@ local function getBorderColor(
         )
 
     if not percentage then
-        if flashState then
-            return theme.errorRed
-        else
-            return theme.errorOrange
-        end
+
+        return flashState
+            and theme.errorRed
+            or theme.errorOrange
     end
 
     if percentage < 25 then
-        if flashState then
-            return theme.criticalRed
-        else
-            return theme.criticalBlack
-        end
+
+        return flashState
+            and theme.criticalRed
+            or theme.criticalBlack
     end
 
     if percentage < 50 then
@@ -1244,6 +1346,7 @@ local function calculateLayout()
         )
 
     if cardWidth < 10 then
+
         error(
             "Monitor too narrow"
         )
@@ -1356,7 +1459,7 @@ local function calculateLayout()
     end
 
     -- =====================================================
-    -- HEADER BUTTONS
+    -- BUTTONS
     -- =====================================================
 
     local rebootWidth = 14
@@ -1387,7 +1490,7 @@ local function calculateLayout()
 end
 
 -- =========================================================
--- HEADER BUTTONS
+-- HEADER
 -- =========================================================
 
 local function drawRebootButton(
@@ -1452,44 +1555,18 @@ local function drawHeader()
         theme.header
     )
 
-    local subtitle =
-        "TARGET BASED RESOURCE STORAGE"
-
-    if refreshStatus.active then
-        local age =
-            os.epoch("utc")
-            - refreshStatus.started
-
-        if age
-            <= refreshMessageSeconds
-                * 1000 then
-
-            subtitle =
-                "TARGET REFRESH: "
-                .. refreshStatus.successCount
-                .. " OK / "
-                .. refreshStatus.failureCount
-                .. " FAILED"
-        else
-            refreshStatus.active =
-                false
-        end
-    end
-
     writeAt(
         3,
         3,
-        shortenText(
-            subtitle,
-            refreshButton.x1
-            - 6
-        ),
+        "TARGET BASED RESOURCE STORAGE",
         theme.headerSubtext,
         theme.header
     )
 
     drawRefreshButton(
-        theme.refreshButton
+        refresh.running
+            and theme.refreshPressed
+            or theme.refreshButton
     )
 
     drawRebootButton(
@@ -1532,8 +1609,7 @@ local function drawCenteredBarText(
             (
                 width
                 - #text
-            )
-            / 2
+            ) / 2
         )
 
     for index = 1,
@@ -1591,17 +1667,13 @@ local function drawProgressBar(
         theme.progressBackground
     )
 
-    if hasError(
-        card
-    ) then
+    if hasError(card) then
 
         drawCenteredBarText(
             x1,
             x2,
             y,
-            getErrorText(
-                card
-            ),
+            getErrorText(card),
             nil,
             nil
         )
@@ -1636,10 +1708,10 @@ local function drawProgressBar(
             card
         )
 
-    local filledUntil =
-        nil
+    local filledUntil = nil
 
     if filledWidth > 0 then
+
         filledUntil =
             x1
             + filledWidth
@@ -1702,7 +1774,7 @@ local function drawMachineChase(
     for offset = 0,
         chaseLength - 1 do
 
-        local pointIndex =
+        local index =
             (
                 startIndex
                 + offset
@@ -1713,7 +1785,7 @@ local function drawMachineChase(
 
         local point =
             points[
-                pointIndex
+                index
             ]
 
         drawPixel(
@@ -1732,9 +1804,7 @@ local function drawCardBorder(
         card.y1,
         card.x2,
         card.y2,
-        getBorderColor(
-            card
-        )
+        getBorderColor(card)
     )
 
     drawMachineChase(
@@ -1743,7 +1813,7 @@ local function drawCardBorder(
 end
 
 -- =========================================================
--- CARDS
+-- CARD
 -- =========================================================
 
 local function drawPlaceholder(
@@ -1814,35 +1884,13 @@ local function drawCard(
 end
 
 -- =========================================================
--- COUNTS
+-- FOOTER
 -- =========================================================
-
-local function countOnline()
-    local count = 0
-
-    for _,
-        itemID
-        in ipairs(
-            cardOrder
-        ) do
-
-        if cards[itemID]
-            and cards[itemID]
-                .online then
-
-            count =
-                count + 1
-        end
-    end
-
-    return count
-end
 
 local function countErrors()
     local count = 0
 
-    for _,
-        itemID
+    for _, itemID
         in ipairs(
             cardOrder
         ) do
@@ -1860,45 +1908,10 @@ local function countErrors()
     return count
 end
 
-local function countCritical()
-    local count = 0
-
-    for _,
-        itemID
-        in ipairs(
-            cardOrder
-        ) do
-
-        local card =
-            cards[itemID]
-
-        if card
-            and not hasError(
-                card
-            ) then
-
-            local percentage =
-                calculatePercentage(
-                    card
-                )
-
-            if percentage
-                and percentage < 25 then
-
-                count =
-                    count + 1
-            end
-        end
-    end
-
-    return count
-end
-
 local function countRunning()
     local count = 0
 
-    for _,
-        itemID
+    for _, itemID
         in ipairs(
             cardOrder
         ) do
@@ -1915,10 +1928,6 @@ local function countRunning()
     return count
 end
 
--- =========================================================
--- FOOTER
--- =========================================================
-
 local function drawFooter()
     local width,
         height =
@@ -1933,14 +1942,10 @@ local function drawFooter()
     )
 
     local text =
-        "ONLINE "
-        .. countOnline()
-        .. "/"
+        "RESOURCES "
         .. #cardOrder
         .. "  ERRORS "
         .. countErrors()
-        .. "  CRITICAL "
-        .. countCritical()
         .. "  RUNNING "
         .. countRunning()
 
@@ -1957,7 +1962,400 @@ local function drawFooter()
 end
 
 -- =========================================================
--- FULL DRAW
+-- REFRESH POPUP COUNTS
+-- =========================================================
+
+local function getExpectedCount()
+    local count = 0
+
+    for _
+        in pairs(
+            refresh.expected
+        ) do
+
+        count =
+            count + 1
+    end
+
+    return count
+end
+
+local function getResponseCount()
+    local count = 0
+
+    for _
+        in pairs(
+            refresh.responses
+        ) do
+
+        count =
+            count + 1
+    end
+
+    return count
+end
+
+local function getSuccessCount()
+    local count = 0
+
+    for _, result
+        in pairs(
+            refresh.responses
+        ) do
+
+        if result.success then
+            count =
+                count + 1
+        end
+    end
+
+    return count
+end
+
+local function getFailureCount()
+    local count = 0
+
+    for _, result
+        in pairs(
+            refresh.responses
+        ) do
+
+        if not result.success then
+            count =
+                count + 1
+        end
+    end
+
+    return count
+end
+
+-- =========================================================
+-- REFRESH POPUP
+-- =========================================================
+
+local function drawRefreshPopup()
+    if not refresh.visible then
+        return
+    end
+
+    local width,
+        height =
+        monitor.getSize()
+
+    local popupWidth =
+        math.min(
+            60,
+            width - 8
+        )
+
+    local expectedCount =
+        getExpectedCount()
+
+    local responseCount =
+        getResponseCount()
+
+    local popupHeight =
+        math.min(
+            18,
+            height - 10
+        )
+
+    local x1 =
+        math.floor(
+            (
+                width
+                - popupWidth
+            ) / 2
+        ) + 1
+
+    local y1 =
+        math.floor(
+            (
+                height
+                - popupHeight
+            ) / 2
+        ) + 1
+
+    local x2 =
+        x1
+        + popupWidth
+        - 1
+
+    local y2 =
+        y1
+        + popupHeight
+        - 1
+
+    drawBorder(
+        x1,
+        y1,
+        x2,
+        y2,
+        theme.popupBorder
+    )
+
+    fill(
+        x1 + 1,
+        y1 + 1,
+        x2 - 1,
+        y2 - 1,
+        theme.popupBackground
+    )
+
+    centerInside(
+        x1 + 2,
+        x2 - 2,
+        y1 + 1,
+        "TARGET REFRESH",
+        theme.popupTitle,
+        theme.popupBackground
+    )
+
+    local summary
+
+    if refresh.running then
+
+        summary =
+            "UPDATING... "
+            .. responseCount
+            .. " / "
+            .. expectedCount
+
+    else
+
+        summary =
+            getSuccessCount()
+            .. " UPDATED / "
+            .. getFailureCount()
+            .. " FAILED"
+    end
+
+    centerInside(
+        x1 + 2,
+        x2 - 2,
+        y1 + 3,
+        summary,
+        colors.white,
+        theme.popupBackground
+    )
+
+    -- =====================================================
+    -- COMPUTER RESULTS
+    -- =====================================================
+
+    local computerIDs = {}
+
+    for computerID
+        in pairs(
+            refresh.expected
+        ) do
+
+        computerIDs[
+            #computerIDs + 1
+        ] =
+            computerID
+    end
+
+    -- Also show replies from computers Main didn't know about.
+    for computerID
+        in pairs(
+            refresh.responses
+        ) do
+
+        if not refresh.expected[
+            computerID
+        ] then
+
+            computerIDs[
+                #computerIDs + 1
+            ] =
+                computerID
+        end
+    end
+
+    table.sort(
+        computerIDs
+    )
+
+    local row =
+        y1 + 5
+
+    for _, computerID
+        in ipairs(
+            computerIDs
+        ) do
+
+        if row >= y2 - 1 then
+            break
+        end
+
+        local result =
+            refresh.responses[
+                computerID
+            ]
+
+        local info =
+            knownComputers[
+                computerID
+            ]
+
+        local role =
+            result
+            and result.role
+            or (
+                info
+                and info.role
+            )
+            or "NODE"
+
+        local label =
+            tostring(role)
+            .. " "
+            .. tostring(
+                computerID
+            )
+
+        if result then
+
+            if result.success then
+
+                writeAt(
+                    x1 + 3,
+                    row,
+                    "+",
+                    theme.success,
+                    theme.popupBackground
+                )
+
+                writeAt(
+                    x1 + 5,
+                    row,
+                    shortenText(
+                        label,
+                        popupWidth - 10
+                    ),
+                    colors.white,
+                    theme.popupBackground
+                )
+
+                writeAt(
+                    x2 - 9,
+                    row,
+                    "UPDATED",
+                    theme.success,
+                    theme.popupBackground
+                )
+
+            else
+
+                writeAt(
+                    x1 + 3,
+                    row,
+                    "X",
+                    theme.failure,
+                    theme.popupBackground
+                )
+
+                writeAt(
+                    x1 + 5,
+                    row,
+                    shortenText(
+                        label,
+                        popupWidth - 10
+                    ),
+                    colors.white,
+                    theme.popupBackground
+                )
+
+                writeAt(
+                    x2 - 8,
+                    row,
+                    "FAILED",
+                    theme.failure,
+                    theme.popupBackground
+                )
+
+                row =
+                    row + 1
+
+                if row < y2 - 1 then
+
+                    writeAt(
+                        x1 + 7,
+                        row,
+                        shortenText(
+                            result.error
+                            or "UNKNOWN ERROR",
+                            popupWidth - 10
+                        ),
+                        theme.failure,
+                        theme.popupBackground
+                    )
+                end
+            end
+
+        else
+
+            writeAt(
+                x1 + 3,
+                row,
+                "?",
+                theme.pending,
+                theme.popupBackground
+            )
+
+            writeAt(
+                x1 + 5,
+                row,
+                shortenText(
+                    label,
+                    popupWidth - 10
+                ),
+                colors.white,
+                theme.popupBackground
+            )
+
+            writeAt(
+                x2 - 8,
+                row,
+                refresh.running
+                    and "WAITING"
+                    or "NO REPLY",
+                theme.pending,
+                theme.popupBackground
+            )
+        end
+
+        row =
+            row + 1
+    end
+
+    if refresh.running then
+
+        centerInside(
+            x1 + 2,
+            x2 - 2,
+            y2 - 1,
+            "WAITING FOR COMPUTERS...",
+            theme.pending,
+            theme.popupBackground
+        )
+
+    else
+
+        centerInside(
+            x1 + 2,
+            x2 - 2,
+            y2 - 1,
+            "RESULTS WILL CLOSE AUTOMATICALLY",
+            colors.lightGray,
+            theme.popupBackground
+        )
+    end
+end
+
+-- =========================================================
+-- FULL SCREEN
 -- =========================================================
 
 local function drawScreen()
@@ -1991,6 +2389,7 @@ local function drawScreen()
             ]
 
         if itemID then
+
             local card =
                 cards[
                     itemID
@@ -2014,7 +2413,9 @@ local function drawScreen()
             drawCard(
                 card
             )
+
         else
+
             drawPlaceholder(
                 slot,
                 index
@@ -2023,6 +2424,8 @@ local function drawScreen()
     end
 
     drawFooter()
+
+    drawRefreshPopup()
 end
 
 -- =========================================================
@@ -2048,40 +2451,21 @@ local function requestDiscovery()
 end
 
 -- =========================================================
--- FORCE TARGET REFRESH
+-- FORCE REFRESH
 -- =========================================================
 
 local function forceTargetRefresh()
-    refreshStatus.active =
+    resetRefresh()
+
+    screenDirty =
         true
-
-    refreshStatus.started =
-        os.epoch(
-            "utc"
-        )
-
-    refreshStatus.successCount =
-        0
-
-    refreshStatus.failureCount =
-        0
-
-    refreshStatus.lastMessage =
-        "Sending refresh..."
-
-    refreshStatus.lastComputer =
-        nil
-
-    drawRefreshButton(
-        theme.refreshPressed
-    )
 
     rednet.broadcast(
         {
             command =
                 "force_targets_refresh",
 
-            senderID =
+            requestedBy =
                 os.getComputerID(),
 
             timestamp =
@@ -2091,9 +2475,82 @@ local function forceTargetRefresh()
         },
         configControlProtocol
     )
+end
 
-    screenDirty =
-        true
+-- =========================================================
+-- REFRESH TIMEOUT
+-- =========================================================
+
+local function updateRefreshState()
+    if not refresh.visible then
+        return
+    end
+
+    local now =
+        os.epoch(
+            "utc"
+        )
+
+    if refresh.running then
+
+        local expected =
+            getExpectedCount()
+
+        local responses =
+            getResponseCount()
+
+        local age =
+            now
+            - refresh.started
+
+        -- Finish early if everybody answered.
+        if expected > 0
+            and responses
+                >= expected then
+
+            refresh.running =
+                false
+
+            refresh.finishedAt =
+                now
+
+            screenDirty =
+                true
+
+        elseif age
+            >= refreshWaitSeconds
+                * 1000 then
+
+            refresh.running =
+                false
+
+            refresh.finishedAt =
+                now
+
+            screenDirty =
+                true
+        end
+
+    else
+
+        if refresh.finishedAt > 0 then
+
+            local age =
+                now
+                - refresh.finishedAt
+
+            if age
+                >= refreshResultSeconds
+                    * 1000 then
+
+                refresh.visible =
+                    false
+
+                screenDirty =
+                    true
+            end
+        end
+    end
 end
 
 -- =========================================================
@@ -2116,7 +2573,11 @@ end
 
 local function renderLoop()
     while true do
+
+        updateRefreshState()
+
         if screenDirty then
+
             screenDirty =
                 false
 
@@ -2135,6 +2596,7 @@ end
 
 local function animationLoop()
     while true do
+
         chaseFrame =
             chaseFrame + 1
 
@@ -2159,60 +2621,72 @@ local function animationLoop()
                 true
         end
 
-        for index,
-            itemID
-            in ipairs(
-                cardOrder
-            ) do
+        -- Don't animate underneath popup.
+        if not refresh.visible then
 
-            if index <= maxStorages then
-                local card =
-                    cards[itemID]
+            for index,
+                itemID
+                in ipairs(
+                    cardOrder
+                ) do
 
-                local slot =
-                    layoutSlots[index]
+                if index
+                    <= maxStorages then
 
-                if card
-                    and slot then
+                    local card =
+                        cards[
+                            itemID
+                        ]
 
-                    card.x1 =
-                        slot.x1
+                    local slot =
+                        layoutSlots[
+                            index
+                        ]
 
-                    card.y1 =
-                        slot.y1
+                    if card
+                        and slot then
 
-                    card.x2 =
-                        slot.x2
+                        card.x1 =
+                            slot.x1
 
-                    card.y2 =
-                        slot.y2
+                        card.y1 =
+                            slot.y1
 
-                    card.borderPoints =
-                        slot.borderPoints
+                        card.x2 =
+                            slot.x2
 
-                    if card.machineRunning then
-                        drawCardBorder(
-                            card
-                        )
+                        card.y2 =
+                            slot.y2
 
-                    elseif flashChanged then
-                        local percentage =
-                            calculatePercentage(
-                                card
-                            )
+                        card.borderPoints =
+                            slot.borderPoints
 
-                        if hasError(
-                            card
-                        )
-                            or (
-                                percentage
-                                and percentage
-                                    < 25
-                            ) then
+                        if card.machineRunning then
 
                             drawCardBorder(
                                 card
                             )
+
+                        elseif flashChanged then
+
+                            local percentage =
+                                calculatePercentage(
+                                    card
+                                )
+
+                            if hasError(
+                                card
+                            )
+                                or (
+                                    percentage
+                                    and percentage
+                                        < 25
+                                ) then
+
+                                drawCardBorder(
+                                    card
+                                )
+                            end
                         end
                     end
                 end
@@ -2239,6 +2713,7 @@ local function eventLoop()
         os.startTimer(2)
 
     while true do
+
         local event,
             a,
             b,
@@ -2246,7 +2721,7 @@ local function eventLoop()
             os.pullEvent()
 
         -- =================================================
-        -- NETWORK
+        -- REDNET
         -- =================================================
 
         if event
@@ -2261,6 +2736,7 @@ local function eventLoop()
             local protocol =
                 c
 
+            -- STORAGE
             if protocol
                     == storageStatusProtocol
                 and type(message)
@@ -2283,6 +2759,7 @@ local function eventLoop()
                     )
                 end
 
+            -- MACHINE
             elseif protocol
                     == machineStatusProtocol
                 and type(message)
@@ -2295,12 +2772,13 @@ local function eventLoop()
                     message
                 )
 
+            -- CONFIG REFRESH
             elseif protocol
                     == configStatusProtocol
                 and type(message)
                     == "table" then
 
-                processConfigStatus(
+                processRefreshStatus(
                     senderID,
                     message
                 )
@@ -2318,29 +2796,31 @@ local function eventLoop()
             local x = b
             local y = c
 
-            -- REBOOT
-            if isInside(
-                x,
-                y,
-                rebootButton.x1,
-                rebootButton.y1,
-                rebootButton.x2,
-                rebootButton.y2
-            ) then
+            -- Ignore touches while popup is showing.
+            if not refresh.visible then
 
-                rebootComputer()
+                if isInside(
+                    x,
+                    y,
+                    rebootButton.x1,
+                    rebootButton.y1,
+                    rebootButton.x2,
+                    rebootButton.y2
+                ) then
 
-            -- REFRESH TARGETS
-            elseif isInside(
-                x,
-                y,
-                refreshButton.x1,
-                refreshButton.y1,
-                refreshButton.x2,
-                refreshButton.y2
-            ) then
+                    rebootComputer()
 
-                forceTargetRefresh()
+                elseif isInside(
+                    x,
+                    y,
+                    refreshButton.x1,
+                    refreshButton.y1,
+                    refreshButton.x2,
+                    refreshButton.y2
+                ) then
+
+                    forceTargetRefresh()
+                end
             end
 
         -- =================================================
@@ -2360,7 +2840,7 @@ local function eventLoop()
                 )
 
         -- =================================================
-        -- STALE
+        -- STALE CHECK
         -- =================================================
 
         elseif event
@@ -2375,7 +2855,7 @@ local function eventLoop()
                 os.startTimer(2)
 
         -- =================================================
-        -- RESIZE
+        -- MONITOR RESIZE
         -- =================================================
 
         elseif event
