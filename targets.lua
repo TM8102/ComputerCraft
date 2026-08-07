@@ -142,6 +142,19 @@ return {
             stopAt = 100
         }
     },
+    ["mysticalagriculture:insanium_essence"] = {
+        displayName = "Insanium Essence",
+        target = 65500,
+
+        machine = {
+            computerID = 4,
+            machineKey = "insanium_essence",
+            side = "front",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
     ["industrialforegoing:meat"] = {
         displayName = "Liquid Meat",
         target = 32000,
