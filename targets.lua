@@ -155,6 +155,19 @@ return {
             stopAt = 100
         }
     },
+    ["minecraft:nether_star"] = {
+        displayName = "Nether Star",
+        target = 65500,
+
+        machine = {
+            computerID = 34
+            machineKey = "nether_star
+            side = "right",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
     ["industrialforegoing:meat"] = {
         displayName = "Liquid Meat",
         target = 32000,
