@@ -182,56 +182,64 @@ end
 -- =========================================================
 
 local function downloadTargets()
-    local cacheBuster = tostring(os.epoch("utc"))
-    local url = githubAPIBase .. "&cb=" .. cacheBuster
+    local cacheBuster =
+        tostring(os.epoch("utc"))
 
-    local response, httpError = http.get(
-        url,
-        {
-            ["User-Agent"] = "CC-Tweaked",
-            ["Accept"] = "application/vnd.github+json",
-            ["Cache-Control"] = "no-cache, no-store",
-            ["Pragma"] = "no-cache"
-        }
-    )
+    local url =
+        githubAPIBase
+        .. "&cb="
+        .. cacheBuster
+
+    local response, httpError =
+        http.get(
+            url,
+            {
+                ["User-Agent"] = "CC-Tweaked",
+                ["Accept"] = "application/vnd.github.raw+json",
+                ["Cache-Control"] = "no-cache, no-store",
+                ["Pragma"] = "no-cache"
+            }
+        )
 
     if not response then
-        return false, "GITHUB API FAILED: " .. tostring(httpError)
+        return false,
+            "GITHUB API FAILED: "
+            .. tostring(httpError)
     end
 
-    local code = response.getResponseCode
+    local code =
+        response.getResponseCode
         and response.getResponseCode()
         or 200
 
-    local body = response.readAll()
+    local contents =
+        response.readAll()
+
     response.close()
 
-    if code < 200 or code >= 300 then
-        return false, "GITHUB HTTP " .. tostring(code)
+    if code < 200
+        or code >= 300 then
+
+        return false,
+            "GITHUB HTTP "
+            .. tostring(code)
     end
 
-    if not body or body == "" then
-        return false, "EMPTY GITHUB RESPONSE"
+    if not contents
+        or contents == "" then
+
+        return false,
+            "EMPTY GITHUB RESPONSE"
     end
 
-    local data = textutils.unserializeJSON(body)
+    -- GitHub returns the actual targets.lua contents
+    -- because we requested the RAW media type.
+    -- No Base64 decoding is required.
 
-    if type(data) ~= "table" then
-        return false, "INVALID GITHUB JSON"
-    end
-
-    if type(data.content) ~= "string" then
-        return false, "GITHUB RESPONSE HAS NO CONTENT"
-    end
-
-    local encoded = string.gsub(data.content, "%s", "")
-    local decoded = textutils.decodeBase64(encoded)
-
-    if not decoded or decoded == "" then
-        return false, "BASE64 DECODE FAILED"
-    end
-
-    return installConfig(decoded, data.sha)
+    return installConfig(
+        contents,
+        "API-" .. cacheBuster
+    )
 end
 
 -- =========================================================
