@@ -17,7 +17,7 @@ return {
         target = 20000,
 
         machine = {
-            computerID = 0,
+            computerID = 200,
             machineKey = "iron",
             side = "top",
 
@@ -30,7 +30,7 @@ return {
         target = 12000,
 
         machine = {
-            computerID = 0,
+            computerID = 200,
             machineKey = "gold",
             side = "bottom",
 
@@ -43,7 +43,7 @@ return {
         target = 50000,
 
         machine = {
-            computerID = 0,
+            computerID = 200,
             machineKey = "redstone",
             side = "left",
 
@@ -119,7 +119,7 @@ return {
     ["industrialforegoing:meat"] = {
         displayName = "Liquid Meat",
         target = 32000,
-        
+
         machine = nil
         
     },
