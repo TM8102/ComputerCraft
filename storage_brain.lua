@@ -1,8 +1,8 @@
 local controllerSide = "top"
 local modemSide = "back"
 
-local targetsURL =
-    "https://raw.githubusercontent.com/TM8102/ComputerCraft/main/targets.lua"
+local targetsAPI =
+    "https://api.github.com/repos/TM8102/ComputerCraft/contents/targets.lua?ref=main"
 
 local configFile = "targets.lua"
 local tempConfigFile = "targets_new.lua"
@@ -16,6 +16,8 @@ local configStatusProtocol = "config_status"
 local updateInterval = 2
 local configUpdateInterval = 300
 local remoteOfflineSeconds = 12
+
+local computerID = os.getComputerID()
 
 if not peripheral.isPresent(modemSide) then
     error("No modem on " .. modemSide)
@@ -39,6 +41,7 @@ end
 local itemConfig = {}
 local remoteStorage = {}
 local itemDemand = {}
+local lastConfigStatus = "LOCAL"
 
 local validSides = {
     top = true,
@@ -58,7 +61,6 @@ local function validateConfig(config)
         if type(itemID) ~= "string" then
             return false, "Bad item ID"
         end
-
         if type(settings) ~= "table" then
             return false, "Bad settings for " .. itemID
         end
@@ -70,7 +72,6 @@ local function validateConfig(config)
 
         if settings.machine then
             local machine = settings.machine
-
             machine.computerID = tonumber(machine.computerID)
             machine.startBelow = tonumber(machine.startBelow) or 50
             machine.stopAt = tonumber(machine.stopAt) or 100
@@ -78,24 +79,18 @@ local function validateConfig(config)
             if not machine.computerID then
                 return false, "Bad computerID for " .. itemID
             end
-
-            if type(machine.machineKey) ~= "string"
-                or machine.machineKey == "" then
+            if type(machine.machineKey) ~= "string" or machine.machineKey == "" then
                 return false, "Bad machineKey for " .. itemID
             end
-
             if not validSides[machine.side] then
                 return false, "Bad machine side for " .. itemID
             end
-
             if machine.startBelow < 0 or machine.startBelow > 100 then
                 return false, "Bad startBelow for " .. itemID
             end
-
             if machine.stopAt <= 0 or machine.stopAt > 100 then
                 return false, "Bad stopAt for " .. itemID
             end
-
             if machine.stopAt <= machine.startBelow then
                 return false, "stopAt must exceed startBelow for " .. itemID
             end
@@ -105,7 +100,7 @@ local function validateConfig(config)
     return true
 end
 
-local function installDownloadedConfig(contents)
+local function installConfig(contents)
     if fs.exists(tempConfigFile) then
         fs.delete(tempConfigFile)
     end
@@ -114,7 +109,6 @@ local function installDownloadedConfig(contents)
     if not file then
         return false, "COULD NOT WRITE TEMP CONFIG"
     end
-
     file.write(contents)
     file.close()
 
@@ -133,7 +127,6 @@ local function installDownloadedConfig(contents)
     if fs.exists(configFile) then
         fs.delete(configFile)
     end
-
     fs.move(tempConfigFile, configFile)
     itemConfig = config
 
@@ -147,20 +140,35 @@ local function installDownloadedConfig(contents)
 end
 
 local function downloadTargets()
-    local response, httpError = http.get(targetsURL)
+    local response, httpError = http.get(
+        targetsAPI,
+        {
+            ["User-Agent"] = "CC-Tweaked",
+            ["Accept"] = "application/vnd.github.raw+json",
+            ["Cache-Control"] = "no-cache"
+        }
+    )
 
     if not response then
-        return false, "GITHUB DOWNLOAD FAILED: " .. tostring(httpError)
+        return false, "GITHUB API FAILED: " .. tostring(httpError)
     end
 
+    local code = response.getResponseCode and response.getResponseCode() or 200
     local contents = response.readAll()
     response.close()
 
+    if code < 200 or code >= 300 then
+        return false, "GITHUB HTTP " .. tostring(code)
+    end
     if not contents or contents == "" then
         return false, "EMPTY GITHUB RESPONSE"
     end
 
-    return installDownloadedConfig(contents)
+    local ok, err = installConfig(contents)
+    if ok then
+        lastConfigStatus = "GITHUB API"
+    end
+    return ok, err
 end
 
 local function loadLocalConfig()
@@ -179,12 +187,13 @@ local function loadLocalConfig()
     end
 
     itemConfig = config
+    lastConfigStatus = "LOCAL CACHE"
     return true
 end
 
 local downloaded, downloadError = downloadTargets()
 if not downloaded then
-    print("GitHub unavailable:")
+    print("GitHub update failed:")
     print(tostring(downloadError))
     print("Using local targets.lua...")
 
@@ -193,7 +202,7 @@ if not downloaded then
         error("Could not load targets.lua: " .. tostring(loadError))
     end
 else
-    print("targets.lua updated.")
+    print("targets.lua updated from GitHub API.")
 end
 
 local function makeDisplayName(itemID)
@@ -216,15 +225,11 @@ local function readController()
     local errors = {}
 
     if type(controller.list) == "function" then
-        local ok, list = pcall(function()
-            return controller.list()
-        end)
-
+        local ok, list = pcall(controller.list)
         if ok and type(list) == "table" then
             readSomething = true
             for _, stack in pairs(list) do
-                if type(stack) == "table"
-                    and type(stack.name) == "string" then
+                if type(stack) == "table" and type(stack.name) == "string" then
                     amounts[stack.name] =
                         (amounts[stack.name] or 0)
                         + (tonumber(stack.count) or 0)
@@ -236,15 +241,11 @@ local function readController()
     end
 
     if type(controller.tanks) == "function" then
-        local ok, tanks = pcall(function()
-            return controller.tanks()
-        end)
-
+        local ok, tanks = pcall(controller.tanks)
         if ok and type(tanks) == "table" then
             readSomething = true
             for _, tank in pairs(tanks) do
-                if type(tank) == "table"
-                    and type(tank.name) == "string" then
+                if type(tank) == "table" and type(tank.name) == "string" then
                     amounts[tank.name] =
                         (amounts[tank.name] or 0)
                         + (tonumber(tank.amount) or 0)
@@ -263,7 +264,7 @@ local function readController()
 end
 
 local function processRemoteInventory(senderID, message)
-    if senderID == os.getComputerID() then
+    if senderID == computerID then
         return
     end
 
@@ -273,7 +274,6 @@ local function processRemoteInventory(senderID, message)
     end
 
     remoteStorage[senderID] = remoteStorage[senderID] or {}
-
     remoteStorage[senderID][itemID] = {
         amount = tonumber(message.amount) or 0,
         lastUpdate = os.epoch("utc")
@@ -281,13 +281,11 @@ local function processRemoteInventory(senderID, message)
 end
 
 local function processRemoteManifest(senderID, message)
-    if senderID == os.getComputerID()
-        or type(message.enabledKeys) ~= "table" then
+    if senderID == computerID or type(message.enabledKeys) ~= "table" then
         return
     end
 
     remoteStorage[senderID] = remoteStorage[senderID] or {}
-
     local enabled = {}
     for _, itemID in ipairs(message.enabledKeys) do
         enabled[itemID] = true
@@ -302,21 +300,20 @@ end
 
 local function buildCombinedAmounts(localAmounts)
     local totals = {}
-
     for itemID in pairs(itemConfig) do
         totals[itemID] = tonumber(localAmounts[itemID]) or 0
     end
 
     local now = os.epoch("utc")
-
     for _, items in pairs(remoteStorage) do
         for itemID, data in pairs(items) do
-            local age = now - (data.lastUpdate or 0)
-
-            if age <= remoteOfflineSeconds * 1000 then
-                totals[itemID] =
-                    (totals[itemID] or 0)
-                    + (tonumber(data.amount) or 0)
+            if itemConfig[itemID] then
+                local age = now - (data.lastUpdate or 0)
+                if age <= remoteOfflineSeconds * 1000 then
+                    totals[itemID] =
+                        (totals[itemID] or 0)
+                        + (tonumber(data.amount) or 0)
+                end
             end
         end
     end
@@ -326,35 +323,33 @@ end
 
 local function sendManifest()
     local keys = {}
-
     for itemID in pairs(itemConfig) do
         keys[#keys + 1] = itemID
     end
-
     table.sort(keys)
 
     rednet.broadcast({
         messageType = "storage_manifest",
         enabledKeys = keys,
         role = "BRAIN",
-        computerID = os.getComputerID(),
+        computerID = computerID,
         timestamp = os.epoch("utc")
     }, storageStatusProtocol)
 end
 
-local function sendLocalStorage(itemID, amount, settings)
+local function sendStorageUpdate(itemID, amount, settings)
     rednet.broadcast({
         messageType = "inventory_update",
         storageKey = itemID,
         itemID = itemID,
         displayName = getDisplayName(itemID, settings),
-        amount = amount,
+        amount = tonumber(amount) or 0,
         targetAmount = settings.target,
         found = true,
         online = true,
         error = nil,
         role = "BRAIN",
-        computerID = os.getComputerID(),
+        computerID = computerID,
         timestamp = os.epoch("utc")
     }, storageStatusProtocol)
 end
@@ -363,7 +358,7 @@ local function updateItemDemand(itemID, amount, settings)
     local machine = settings.machine
     if not machine then
         itemDemand[itemID] = nil
-        return false
+        return false, 0
     end
 
     local percentage = (amount / settings.target) * 100
@@ -373,10 +368,8 @@ local function updateItemDemand(itemID, amount, settings)
         if percentage >= machine.stopAt then
             wants = false
         end
-    else
-        if percentage < machine.startBelow then
-            wants = true
-        end
+    elseif percentage < machine.startBelow then
+        wants = true
     end
 
     itemDemand[itemID] = wants
@@ -389,19 +382,14 @@ local function sendGroupedMachineCommands(combined)
     for itemID, settings in pairs(itemConfig) do
         if settings.machine then
             local machine = settings.machine
-            local wants, percentage =
-                updateItemDemand(
-                    itemID,
-                    tonumber(combined[itemID]) or 0,
-                    settings
-                )
+            local wants, percentage = updateItemDemand(
+                itemID,
+                tonumber(combined[itemID]) or 0,
+                settings
+            )
 
-            local key =
-                tostring(machine.computerID)
-                .. ":"
-                .. tostring(machine.side)
-
-            local group = groups[key]
+            local groupKey = tostring(machine.computerID) .. ":" .. machine.side
+            local group = groups[groupKey]
             if not group then
                 group = {
                     computerID = machine.computerID,
@@ -409,19 +397,21 @@ local function sendGroupedMachineCommands(combined)
                     state = false,
                     itemIDs = {},
                     machineKeys = {},
-                    percentages = {}
+                    percentages = {},
+                    amounts = {},
+                    targets = {}
                 }
-                groups[key] = group
+                groups[groupKey] = group
             end
 
             if wants then
                 group.state = true
             end
-
             group.itemIDs[#group.itemIDs + 1] = itemID
-            group.machineKeys[#group.machineKeys + 1] =
-                machine.machineKey
+            group.machineKeys[#group.machineKeys + 1] = machine.machineKey
             group.percentages[itemID] = percentage
+            group.amounts[itemID] = tonumber(combined[itemID]) or 0
+            group.targets[itemID] = settings.target
         end
     end
 
@@ -433,6 +423,8 @@ local function sendGroupedMachineCommands(combined)
             itemIDs = group.itemIDs,
             machineKeys = group.machineKeys,
             percentages = group.percentages,
+            amounts = group.amounts,
+            targets = group.targets,
             timestamp = os.epoch("utc")
         }, machineControlProtocol)
     end
@@ -440,15 +432,13 @@ end
 
 local function automationCycle()
     local localAmounts, readError = readController()
-
     if not localAmounts then
         return false, readError
     end
 
     sendManifest()
-
     for itemID, settings in pairs(itemConfig) do
-        sendLocalStorage(
+        sendStorageUpdate(
             itemID,
             tonumber(localAmounts[itemID]) or 0,
             settings
@@ -457,7 +447,6 @@ local function automationCycle()
 
     local combined = buildCombinedAmounts(localAmounts)
     sendGroupedMachineCommands(combined)
-
     return true
 end
 
@@ -467,14 +456,13 @@ local function sendRefreshStatus(success, errorMessage)
         success = success == true,
         error = errorMessage,
         role = "BRAIN",
-        computerID = os.getComputerID(),
+        computerID = computerID,
         timestamp = os.epoch("utc")
     }, configStatusProtocol)
 end
 
 local function forceTargetsRefresh()
     local success, refreshError = downloadTargets()
-
     if not success then
         sendRefreshStatus(false, refreshError)
         return false
@@ -482,7 +470,6 @@ local function forceTargetsRefresh()
 
     automationCycle()
     sendRefreshStatus(true, nil)
-
     return true
 end
 
@@ -494,9 +481,9 @@ local function drawLocalScreen()
 
     print("FUNCTIONAL STORAGE BRAIN")
     print("========================")
-    print("Computer: " .. os.getComputerID())
+    print("Computer: " .. computerID)
     print("Controller: " .. string.upper(controllerSide))
-    print("Config: GitHub")
+    print("Config: " .. lastConfigStatus)
     print("")
 
     local localAmounts, readError = readController()
@@ -509,7 +496,6 @@ local function drawLocalScreen()
 
     local combined = buildCombinedAmounts(localAmounts)
     local sorted = {}
-
     for itemID in pairs(itemConfig) do
         sorted[#sorted + 1] = itemID
     end
@@ -518,21 +504,13 @@ local function drawLocalScreen()
     for index = 1, math.min(#sorted, 8) do
         local itemID = sorted[index]
         local settings = itemConfig[itemID]
-
         print(getDisplayName(itemID, settings))
-        print(
-            " "
-            .. math.floor(combined[itemID] or 0)
-            .. " / "
-            .. math.floor(settings.target)
-        )
-
+        print(" " .. math.floor(combined[itemID] or 0) .. " / " .. math.floor(settings.target))
         if itemDemand[itemID] then
             term.setTextColor(colors.lime)
             print(" MACHINE REQUESTED")
             term.setTextColor(colors.white)
         end
-
         print("")
     end
 end
@@ -554,9 +532,7 @@ end
 local function configLoop()
     while true do
         sleep(configUpdateInterval)
-
         local success, configError = downloadTargets()
-
         if success then
             automationCycle()
         else
@@ -570,9 +546,7 @@ local function networkLoop()
     while true do
         local senderID, message, protocol = rednet.receive()
 
-        if protocol == storageStatusProtocol
-            and type(message) == "table" then
-
+        if protocol == storageStatusProtocol and type(message) == "table" then
             if message.messageType == "inventory_update" then
                 processRemoteInventory(senderID, message)
             elseif message.messageType == "storage_manifest" then
@@ -582,13 +556,11 @@ local function networkLoop()
         elseif protocol == storageControlProtocol
             and type(message) == "table"
             and message.command == "discover" then
-
             automationCycle()
 
         elseif protocol == configControlProtocol
             and type(message) == "table"
             and message.command == "force_targets_refresh" then
-
             forceTargetsRefresh()
         end
     end
