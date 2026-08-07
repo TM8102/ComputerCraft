@@ -161,7 +161,7 @@ return {
 
         machine = {
             computerID = 34,
-            machineKey = "nether_star,
+            machineKey = "nether_star",
             side = "right",
 
             startBelow = 50,
