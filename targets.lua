@@ -96,7 +96,7 @@ return {
 
         machine = {
             computerID = 12,
-            machineKey = "meat",
+            machineKey = "pink_slime",
             side = "top",
 
             startBelow = 50,
