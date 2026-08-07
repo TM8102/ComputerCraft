@@ -175,6 +175,12 @@ return {
         machine = nil
         
     },
+    ["mysticalagriculture:fertilized_essence"] = {
+        displayName = "Fertilized Essence",
+        target = 65500,
+
+        machine = nil
+    },
     -- =====================================================
     -- STORAGE ONLY
     --
