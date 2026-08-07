@@ -8,7 +8,7 @@ return {
     --     [COMPUTER_ID] = {
     --         front = "Spider",
     --         back  = "Zombie",
-    --         left  = "Creeper",
+    --         left  = "N/A",
     --         right = "Skeleton"
     --     }
     -- }
@@ -17,16 +17,21 @@ return {
     -- computer. The text is exactly what appears on the
     -- Mob Control Panel.
     --
-    -- To disable a side, remove the line or set it to false.
-    -- Keys are generated automatically as side_<side>.
-    -- You do NOT need to edit the remote computers.
+    -- DISABLING A SIDE:
+    --   side = "N/A"
+    --   side = false
+    --   or simply remove the line.
+    --
+    -- Disabled/N/A sides are NOT sent to the Mob Control
+    -- Panel and will not have a card on the screen.
     -- =====================================================
 
     configUpdateInterval = 300,
     statusUpdateInterval = 4,
 
-    -- Used by a new/unlisted remote computer so you can see
-    -- its Computer ID before adding a real profile below.
+    -- New/unlisted nodes show their Computer ID locally.
+    -- All default sides are disabled, so a new node will not
+    -- create junk N/A cards on the Mob Control Panel.
     default = {
         front = "N/A",
         back = "N/A",
@@ -35,32 +40,25 @@ return {
     },
 
     computers = {
-        -- EXAMPLE:
-        -- [123] = {
-        --     front = "Spider",
-        --     back = "Zombie",
-        --     left = "Creeper",
-        --     right = "Skeleton"
-        -- },
-
-        -- Add each remote spawner computer here.
         [26] = {
-             front = "N/A",
-             back = "Wither Skeletons",
-             left = "N/A",
-             right = "N/A"
-         },
-         [20] = {
-             front = "N/A",
-             back = "Spiders",
-             left = "Ghasts",
-             right = "Skeletons"
-         },
-         [24] = {
-             front = "Zombie",
-             back = "Charged Creepers",
-             left = "Endermen",
-             right = "N/A"
-         }
+            front = "N/A",
+            back = "Wither Skeletons",
+            left = "N/A",
+            right = "N/A"
+        },
+
+        [20] = {
+            front = "N/A",
+            back = "Spiders",
+            left = "Ghasts",
+            right = "Skeletons"
+        },
+
+        [24] = {
+            front = "Zombie",
+            back = "Charged Creepers",
+            left = "Endermen",
+            right = "N/A"
+        }
     }
 }
