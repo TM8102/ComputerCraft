@@ -16,7 +16,7 @@ local tankSide =
     "right"
 
 local clickerWandSlot =
-    0
+    1
 
 local tankWandSlot =
     3
