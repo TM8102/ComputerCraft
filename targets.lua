@@ -147,9 +147,9 @@ return {
         target = 2097152000,
 
         machine = {
-            computerID = 200,
+            computerID = 32,
             machineKey = "time_fluid",
-            side = "right",
+            side = "front",
 
             startBelow = 50,
             stopAt = 100
