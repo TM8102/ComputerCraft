@@ -90,13 +90,13 @@ return {
             stopAt = 100
         }
     },
-    ["minecraft:grass"] = {
-        displayName = "Grass",
+    ["minecraft:diamond"] = {
+        displayName = "Diamond",
         target = 512000,
 
         machine = {
             computerID = 202,
-            machineKey = "grass",
+            machineKey = "diamond",
             side = "top",
 
             startBelow = 50,
