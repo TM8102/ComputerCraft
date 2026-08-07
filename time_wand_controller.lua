@@ -19,7 +19,7 @@ local clickerWandSlot =
     1
 
 local tankWandSlot =
-    3
+    4
 
 local wandID =
     "justdirethings:time_wand"
