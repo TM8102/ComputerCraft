@@ -90,9 +90,9 @@ end
 local itemConfig = {}
 
 local validSides = {
-    top = false,
+    top = true,
     bottom = false,
-    left = true,
+    left = false,
     right = false
 }
 
