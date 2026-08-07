@@ -26,7 +26,7 @@ return {
     -- Panel and will not have a card on the screen.
     -- =====================================================
 
-    configUpdateInterval = 300,
+    configUpdateInterval = 300000,
     statusUpdateInterval = 4,
 
     -- New/unlisted nodes show their Computer ID locally.
