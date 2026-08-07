@@ -19,7 +19,7 @@
 --   TOP stays ON if EITHER resource requests production.
 -- =========================================================
 
-local modemSide = "back"
+local modemSide = "top"
 
 -- =========================================================
 -- GITHUB
