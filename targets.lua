@@ -128,5 +128,11 @@ return {
         target = 65500,
 
         machine = nil
+    },
+    ["minecraft:dirt"] = {
+        displayName = "Test",
+        target = 500,
+
+        machine = nil
     }
 }
