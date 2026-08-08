@@ -116,6 +116,19 @@ return {
             stopAt = 100
         }
     },
+    ["mysticalagriculture:sculk_essence"] = {
+        displayName = "Sculk Essence",
+        target = 65500,
+
+        machine = {
+            computerID = 34,
+            machineKey = "skulk_essence",
+            side = "front",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
     ["mysticalagradditions:insanium_essence"] = {
         displayName = "Insanium",
         target = 65500,
