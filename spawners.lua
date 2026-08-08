@@ -33,7 +33,7 @@ return {
             front = "N/A",
             back = "Wither Skeletons",
             left = "N/A",
-            right = "N/A"
+            right = "Wilden Guardian"
         },
 
         [20] = {
