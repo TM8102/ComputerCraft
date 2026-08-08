@@ -181,6 +181,19 @@ return {
             stopAt = 100
         }
     },
+    ["mysticalagriculture:fire_essence"] = {
+        displayName = "Faire Essence",
+        target = 65500,
+
+        machine = {
+            computerID = 11,
+            machineKey = "fire_essence",
+            side = "back",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
     ["mysticalagradditions:insanium_essence"] = {
         displayName = "Insanium",
         target = 65500,
