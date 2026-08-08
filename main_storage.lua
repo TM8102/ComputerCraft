@@ -1,14 +1,8 @@
 -- =========================================================
 -- MAIN STORAGE SCREEN
--- Low resources first, 40 cards/page, auto-rotation.
--- Card layout:
---   L1 border
---   L2 empty
---   L3 name
---   L4 progress bar
---   L5 empty
---   L6 border
--- One blank line between card rows.
+-- Stable alphabetical card positions, 40 cards/page.
+-- Low resources are reported to the Main Status Screen instead
+-- of being moved to the front of this display.
 -- =========================================================
 
 local monitorSide = "right"
@@ -20,6 +14,7 @@ local machineControlProtocol = "resource_machine_control"
 local machineStatusProtocol = "resource_machine_status"
 local configControlProtocol = "config_control"
 local configStatusProtocol = "config_status"
+local systemStatusProtocol = "system_status"
 
 local cardsPerPage = 40
 local pageSeconds = 15
@@ -32,6 +27,7 @@ local refreshResultSeconds = 10
 local animationSpeed = 0.12
 local flashInterval = 0.48
 local chaseLength = 6
+local lowSummaryInterval = 2
 
 local chaseFrame = 0
 local flashState = false
@@ -213,15 +209,6 @@ local function getErrorText(card)
     return "ERROR"
 end
 
-local function priorityForCard(card)
-    if hasError(card) then return 0,-1 end
-    local p=calculatePercentage(card) or 0
-    if p<25 then return 1,p end
-    if p<50 then return 2,p end
-    if p<75 then return 3,p end
-    return 4,p
-end
-
 local function rebuildCards()
     local time=now(); local combined={}
     for _,source in pairs(storageSources) do
@@ -251,13 +238,17 @@ local function rebuildCards()
         elseif combined[itemID] then combined[itemID].machineRunning=machine.running==true end
     end
 
-    cards=combined; cardOrder={}
+    cards=combined
+    cardOrder={}
     for itemID in pairs(cards) do cardOrder[#cardOrder+1]=itemID end
+
+    -- IMPORTANT: card order is now deterministic and NEVER changes because
+    -- a resource becomes low/full. Low resources stay in their normal slot.
     table.sort(cardOrder,function(a,b)
-        local pa,va=priorityForCard(cards[a]); local pb,vb=priorityForCard(cards[b])
-        if pa~=pb then return pa<pb end
-        if va~=vb then return va<vb end
-        return string.lower(cards[a].name or a)<string.lower(cards[b].name or b)
+        local an=string.lower(cards[a].name or a)
+        local bn=string.lower(cards[b].name or b)
+        if an~=bn then return an<bn end
+        return a<b
     end)
 
     local pages=math.max(1,math.ceil(#cardOrder/cardsPerPage))
@@ -301,11 +292,6 @@ local function updatePageRotation()
     end
 end
 
--- =========================================================
--- LAYOUT
--- 5 columns x 8 rows = 40 cards per page.
--- Six-line cards with one blank line between each row.
--- =========================================================
 local function calculateLayout()
     local width,height=monitor.getSize()
     local columns,rows=5,8
@@ -353,7 +339,7 @@ local function drawHeader()
     local width=monitor.getSize()
     fill(1,1,width,5,theme.header)
     writeAt(3,2,"STORAGE MANAGEMENT",theme.headerText,theme.header)
-    local pages=pageCount(); local subtitle="LOW RESOURCES FIRST"
+    local pages=pageCount(); local subtitle="FIXED RESOURCE POSITIONS"
     if pages>1 then
         local elapsed=math.floor((now()-pageChangedAt)/1000)
         local remaining=math.max(0,pageSeconds-elapsed)
@@ -433,6 +419,44 @@ local function countLow()
         if card then local p=calculatePercentage(card); if hasError(card) or (p and p<75) then count=count+1 end end
     end
     return count
+end
+
+local function buildLowResourceSummary()
+    rebuildCards()
+    local low={}
+    for _,itemID in ipairs(cardOrder) do
+        local card=cards[itemID]
+        local percent=calculatePercentage(card)
+        if card and (hasError(card) or (percent and percent<75)) then
+            low[#low+1]={
+                itemID=itemID,
+                name=card.name or itemID,
+                amount=tonumber(card.amount) or 0,
+                target=tonumber(card.targetAmount) or 0,
+                percent=percent,
+                error=hasError(card) and getErrorText(card) or nil,
+                machineRunning=card.machineRunning==true
+            }
+        end
+    end
+    table.sort(low,function(a,b)
+        if (a.error~=nil)~=(b.error~=nil) then return a.error~=nil end
+        local ap=tonumber(a.percent) or -1
+        local bp=tonumber(b.percent) or -1
+        if ap~=bp then return ap<bp end
+        return string.lower(a.name)<string.lower(b.name)
+    end)
+    return low
+end
+
+local function broadcastLowResources()
+    rednet.broadcast({
+        messageType="low_resource_summary",
+        resources=buildLowResourceSummary(),
+        totalResources=#cardOrder,
+        timestamp=now(),
+        computerID=os.getComputerID()
+    },systemStatusProtocol)
 end
 
 local function drawFooter()
@@ -566,6 +590,13 @@ local function animationLoop()
     end
 end
 
+local function lowSummaryLoop()
+    while true do
+        broadcastLowResources()
+        sleep(lowSummaryInterval)
+    end
+end
+
 local function eventLoop()
     local discoveryTimer=os.startTimer(discoveryInterval); local staleTimer=os.startTimer(2)
     while true do
@@ -594,5 +625,5 @@ local function eventLoop()
     end
 end
 
-calculateLayout(); drawScreen(); screenDirty=false; requestDiscovery()
-parallel.waitForAll(eventLoop,renderLoop,animationLoop)
+calculateLayout(); drawScreen(); screenDirty=false; requestDiscovery(); broadcastLowResources()
+parallel.waitForAll(eventLoop,renderLoop,animationLoop,lowSummaryLoop)
