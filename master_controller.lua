@@ -1,8 +1,8 @@
 -- =========================================================
 -- COMPUTERCRAFT MASTER CONTROLLER
--- Designed for a 4-block-wide x 1-block-tall TOP monitor.
--- Central authenticated GitHub cache + Rednet file server.
--- Serializes target/spawner refreshes one PC at a time.
+-- 4-wide x 1-tall TOP monitor.
+-- Central GitHub cache, sequential config refreshes, push-all,
+-- and linked-computer directory for the Main Status Screen.
 -- =========================================================
 
 local protocol="cc_master_update"
@@ -25,12 +25,8 @@ local managedFiles={
 }
 
 local computerID=os.getComputerID()
-local modemSide
-local monitor
-local monitorName
-local cache={}
-local cacheStatus={}
-local clients={}
+local modemSide,monitor,monitorName
+local cache,cacheStatus,clients={},{},{}
 local lastRefresh=0
 local lastRefreshError=nil
 local githubToken=nil
@@ -90,9 +86,7 @@ local function setupTokenIfMissing()
     if token~="" and writeFile(tokenFile,token) then
         githubToken=token; githubAuthStatus="TOKEN SAVED"
         print(""); print("Token saved locally.")
-    elseif token~="" then
-        githubAuthStatus="TOKEN SAVE FAILED"
-    end
+    elseif token~="" then githubAuthStatus="TOKEN SAVE FAILED" end
     sleep(1)
 end
 
@@ -150,18 +144,15 @@ local function downloadFromGitHub(file)
     updateRateInfo(response)
     local code=response.getResponseCode and response.getResponseCode() or 200
     local data=response.readAll(); response.close()
-
     if code==401 then githubAuthStatus="TOKEN REJECTED"; return false,"GITHUB 401" end
     if code==403 and githubRateRemaining==0 then return false,"RATE LIMIT" end
     if code<200 or code>=300 then return false,"GITHUB HTTP "..tostring(code) end
     githubAuthStatus=(githubToken and githubToken~="") and "AUTHENTICATED" or "UNAUTHENTICATED"
     if not data or data=="" then return false,"EMPTY FILE" end
-
     if tostring(file):sub(-4)==".lua" then
         local loader,syntaxError=load(data,"@"..tostring(file),"t",_ENV)
         if not loader then return false,"LUA ERROR: "..tostring(syntaxError) end
     end
-
     cache[file]=data
     cacheStatus[file]={source="GITHUB",updated=now(),bytes=#data}
     writeFile(cachePath(file),data)
@@ -205,6 +196,43 @@ local function rememberClient(id,message)
     clients[id]=info
 end
 
+local function linkedComputerList()
+    local list={{
+        id=computerID,
+        roleNumber="9",
+        roleName="MASTER CONTROLLER",
+        roleFile="master_controller.lua",
+        refreshGroup=nil,
+        lastSeen=now(),
+        isMaster=true
+    }}
+    for id,info in pairs(clients) do
+        if id~=computerID then
+            list[#list+1]={
+                id=id,
+                roleNumber=info.roleNumber,
+                roleName=info.roleName or "UNKNOWN",
+                roleFile=info.roleFile,
+                refreshGroup=info.refreshGroup,
+                lastSeen=info.lastSeen or 0,
+                isMaster=false
+            }
+        end
+    end
+    table.sort(list,function(a,b) return tonumber(a.id) < tonumber(b.id) end)
+    return list
+end
+
+local function sendLinkedComputers(targetID,requestID)
+    rednet.send(targetID,{
+        type="linked_computers_response",
+        requestID=requestID,
+        masterID=computerID,
+        timestamp=now(),
+        computers=linkedComputerList()
+    },protocol)
+end
+
 local function sendFile(targetID,file,requestID,forceFresh)
     local refreshed,refreshError=refreshFileIfNeeded(file,forceFresh==true)
     local data=cache[file]
@@ -230,11 +258,13 @@ local function networkLoop()
     while true do
         local senderID,message,incomingProtocol=rednet.receive()
         if incomingProtocol==protocol and type(message)=="table" then
-            rememberClient(senderID,message)
+            if message.type~="get_linked_computers" then rememberClient(senderID,message) end
             if message.type=="discover_master" then
                 rednet.send(senderID,{type="master_hello",masterID=computerID,timestamp=now()},protocol)
             elseif message.type=="register_client" then
                 rednet.send(senderID,{type="register_ack",masterID=computerID,timestamp=now()},protocol)
+            elseif message.type=="get_linked_computers" then
+                sendLinkedComputers(senderID,message.requestID)
             elseif message.type=="get_file" and type(message.file)=="string" then
                 sendFile(senderID,message.file,message.requestID,message.fresh)
             elseif message.type=="refresh_file" and type(message.file)=="string" then
@@ -278,11 +308,9 @@ local function sequentialRefreshLoop()
             local statusProtocol=group=="targets" and "config_status" or "spawner_config_status"
             local replyCommand=group=="targets" and "targets_refresh_status" or "spawners_refresh_status"
             local ids=clientIDsForGroup(group)
-
             lastAction=string.upper(group).." -> GITHUB"
             refreshFile(configFile)
             job.total=#ids; job.done=0; job.current=nil; job.timeouts=0
-
             for _,id in ipairs(ids) do
                 job.current=id
                 lastAction=string.upper(group).." PC "..id.." "..(job.done+1).."/"..job.total
@@ -350,8 +378,7 @@ end
 local function inside(x,y,b) return x>=b.x1 and x<=b.x2 and y>=b.y1 and y<=b.y2 end
 
 local function calculateLayout()
-    local width,height=monitor.getSize()
-    -- 4x1 monitor: keep both controls on one compact 3-line row.
+    local width=monitor.getSize()
     local margin=1; local gap=1
     local buttonWidth=math.floor((width-(margin*2)-gap)/2)
     buttons.github={x1=margin,y1=2,x2=margin+buttonWidth-1,y2=4}
@@ -364,55 +391,40 @@ local function drawButton(b,text,color)
 end
 
 local function clientCount()
-    local count=0
-    for _ in pairs(clients) do count=count+1 end
-    return count
+    local count=0 for _ in pairs(clients) do count=count+1 end return count
 end
-
 local function cachedCount()
-    local count=0
-    for _,file in ipairs(managedFiles) do if cache[file] then count=count+1 end end
-    return count
+    local count=0 for _,file in ipairs(managedFiles) do if cache[file] then count=count+1 end end return count
 end
 
 local function drawScreen()
     local width,height=monitor.getSize()
     fill(1,1,width,height,colors.black)
-
-    -- Compact header/control area for a 1-block-tall monitor.
     fill(1,1,width,4,colors.cyan)
     center(1,width,1,"MASTER CONTROLLER  PC "..computerID,colors.black,colors.cyan)
     drawButton(buttons.github,"REFRESH GITHUB",colors.green)
     drawButton(buttons.push,pushRunning and ("PUSH "..pushDone.."/"..pushTotal) or "PUSH TO ALL",colors.blue)
-
     local y=5
     if y<=height then fill(1,y,width,y,colors.blue); y=y+1 end
-
     local function line(left,right,leftColor,rightColor)
         if y>height then return end
         left=tostring(left or ""); right=tostring(right or "")
         writeAt(2,y,left,leftColor or colors.white,colors.black,math.floor(width*0.62))
-        if right~="" then
-            local x=math.max(2,width-#right)
-            writeAt(x,y,right,rightColor or colors.white,colors.black)
-        end
+        if right~="" then writeAt(math.max(2,width-#right),y,right,rightColor or colors.white,colors.black) end
         y=y+1
     end
-
     local authColor=githubAuthStatus=="AUTHENTICATED" and colors.lime or (githubAuthStatus=="TOKEN REJECTED" and colors.red or colors.orange)
     local rate=(githubRateRemaining and githubRateLimit) and (githubRateRemaining.."/"..githubRateLimit) or "RATE ?"
     line("GITHUB "..githubAuthStatus,rate,authColor,colors.lightGray)
     line("CACHE "..cachedCount().."/"..#managedFiles,"CLIENTS "..clientCount(),cachedCount()==#managedFiles and colors.lime or colors.orange,colors.white)
-
     if activeRefreshJob then
         line("REFRESH "..string.upper(activeRefreshJob.kind),"PC "..tostring(activeRefreshJob.current or "PREP"),colors.orange,colors.orange)
-        line("PROGRESS "..tostring(activeRefreshJob.done or 0).."/"..tostring(activeRefreshJob.total or 0),"QUEUE "..#refreshQueue,colors.white,colors.white)
+        line("PROGRESS "..tostring(activeRefreshJob.done or 0).."/"..tostring(activeRefreshJob.total or 0),"QUEUE "..#refreshQueue)
     elseif pushRunning then
         line("PUSHING UPDATES",pushDone.."/"..pushTotal,colors.lightBlue,colors.white)
     else
         line("STATUS",lastAction,colors.cyan,colors.white)
     end
-
     if y<=height then
         local health=lastRefreshError and "GITHUB ERRORS" or "CACHE HEALTHY"
         line(lastRefresh>0 and ("GITHUB "..math.floor((now()-lastRefresh)/1000).."s AGO") or "GITHUB NOT YET REFRESHED",
@@ -420,20 +432,13 @@ local function drawScreen()
     end
 end
 
-local function displayLoop()
-    while true do drawScreen(); sleep(0.25) end
-end
-
+local function displayLoop() while true do drawScreen(); sleep(0.25) end end
 local function monitorLoop()
     while true do
-        local event,side,x,y=os.pullEvent("monitor_touch")
+        local _,side,x,y=os.pullEvent("monitor_touch")
         if side==monitorName then
-            if inside(x,y,buttons.github) then
-                drawButton(buttons.github,"REFRESHING...",colors.lime)
-                refreshAll()
-            elseif inside(x,y,buttons.push) and not pushRunning then
-                buildPushQueue()
-            end
+            if inside(x,y,buttons.github) then drawButton(buttons.github,"REFRESHING...",colors.lime); refreshAll()
+            elseif inside(x,y,buttons.push) and not pushRunning then buildPushQueue() end
         end
     end
 end
