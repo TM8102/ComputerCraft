@@ -32,7 +32,7 @@ if not monitor then error("No Advanced Monitor found") end
 rednet.open(modemSide)
 monitor.setTextScale(0.5)
 
-local machines,spawners={},{}}
+local machines,spawners={},{}
 local fansState=nil
 local lowResources={}
 local lowSummaryUpdated=0
