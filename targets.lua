@@ -155,6 +155,19 @@ return {
             stopAt = 100
         }
     },
+    ["mysticalagriculture:honey_essence"] = {
+        displayName = "Honey Essence",
+        target = 65500,
+
+        machine = {
+            computerID = 35,
+            machineKey = "honey_essence",
+            side = "left",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
     ["mysticalagradditions:insanium_essence"] = {
         displayName = "Insanium",
         target = 65500,
