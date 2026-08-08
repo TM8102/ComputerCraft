@@ -30,9 +30,9 @@ return {
 
     computers = {
         [26] = {
-            front = "N/A",
+            front = "Wilden Stalker",
             back = "Wither Skeletons",
-            left = "N/A",
+            left = "Wilden Hunter",
             right = "Wilden Guardian"
         },
 
