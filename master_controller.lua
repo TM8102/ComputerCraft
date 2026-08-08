@@ -56,7 +56,8 @@ rednet.host(protocol, hostname)
 if not fs.exists(cacheDir) then fs.makeDir(cacheDir) end
 
 local function cachePath(file)
-    return fs.combine(cacheDir, file:gsub("/", "__"))
+    local safeName = (tostring(file):gsub("/", "__"))
+    return fs.combine(cacheDir, safeName)
 end
 
 local function readFile(path)
