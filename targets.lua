@@ -168,6 +168,19 @@ return {
             stopAt = 100
         }
     },
+    ["mysticalagriculture:stone_essence"] = {
+        displayName = "Stone Essence",
+        target = 65500,
+
+        machine = {
+            computerID = 35,
+            machineKey = "stone_essence",
+            side = "front",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
     ["mysticalagradditions:insanium_essence"] = {
         displayName = "Insanium",
         target = 65500,
