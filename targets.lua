@@ -129,6 +129,32 @@ return {
             stopAt = 100
         }
     },
+    ["mysticalagriculture:dirt_essence"] = {
+        displayName = "Dirt Essence",
+        target = 65500,
+
+        machine = {
+            computerID = 35,
+            machineKey = "dirt_essence",
+            side = "back",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
+    ["mysticalagriculture:water_essence"] = {
+        displayName = "Water Essence",
+        target = 65500,
+
+        machine = {
+            computerID = 35,
+            machineKey = "water_essence",
+            side = "right",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
     ["mysticalagradditions:insanium_essence"] = {
         displayName = "Insanium",
         target = 65500,
