@@ -233,6 +233,19 @@ return {
             stopAt = 100
         }
     },
+    ["minecraft:iron_ingot"] = {
+        displayName = "Iron Ingot",
+        target = 2097152000,
+
+        machine = {
+            computerID = 500,
+            machineKey = "iron_ingot",
+            side = "front",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
     ["justdirethings:polymorphic_fluid_source"] = {
         displayName = "Polymorphic Fluid",
         target = 512000,
