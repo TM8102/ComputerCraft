@@ -246,6 +246,32 @@ return {
             stopAt = 100
         }
     },
+    ["minecraft:gold_ingot"] = {
+        displayName = "Gold Ingot",
+        target = 2097152000,
+
+        machine = {
+            computerID = 500,
+            machineKey = "gold_ingot",
+            side = "right",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
+    ["allthemodium:allthemodium_ingot"] = {
+        displayName = "AllTheModium Ingot",
+        target = 2097152000,
+
+        machine = {
+            computerID = 500,
+            machineKey = "allthemodium_ingot",
+            side = "back",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
     ["justdirethings:polymorphic_fluid_source"] = {
         displayName = "Polymorphic Fluid",
         target = 512000,
