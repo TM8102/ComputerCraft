@@ -4,12 +4,14 @@
 -- Refresh broadcasts are routed through the Master so nodes are
 -- updated one-at-a-time instead of all at once.
 -- The startup listener also accepts PUSH ALL from the Master.
+-- Clients heartbeat/register so the Master always knows them.
 -- =========================================================
 
 local masterProtocol = "cc_master_update"
 local rawBase = "https://raw.githubusercontent.com/TM8102/ComputerCraft/main/"
 local roleFile = ".computer_role"
 local masterTimeout = 3
+local heartbeatSeconds = 10
 
 local roles = {
     ["1"] = { name="MAIN STORAGE SCREEN", file="main_storage.lua" },
@@ -150,7 +152,6 @@ local function registerWithMaster(roleNumber,role)
 end
 
 -- Intercept ONLY manual config-refresh broadcasts from the two panels.
--- Everything else keeps using normal rednet.broadcast behavior.
 local originalBroadcast=rednet.broadcast
 local function installRefreshRouter()
     rednet.broadcast=function(message,protocol)
@@ -177,17 +178,27 @@ local function installRefreshRouter()
     end
 end
 
-local function masterPushListener()
+local function masterControlListener(roleNumber,role)
     while true do
-        local _,message,protocol=rednet.receive(masterProtocol)
-        if type(message)=="table" and message.type=="push_update" then
-            clearScreen()
-            term.setTextColor(colors.cyan)
-            print("MASTER PUSH UPDATE")
-            term.setTextColor(colors.white)
-            print("Rebooting to pull latest files...")
-            sleep(0.35)
-            os.reboot()
+        local senderID,message,protocol=rednet.receive(masterProtocol,heartbeatSeconds)
+
+        if senderID and type(message)=="table" then
+            if message.type=="push_update" then
+                clearScreen()
+                term.setTextColor(colors.cyan)
+                print("MASTER PUSH UPDATE")
+                term.setTextColor(colors.white)
+                print("Rebooting to pull latest files...")
+                sleep(0.35)
+                os.reboot()
+
+            elseif message.type=="discover_clients" then
+                -- Respond immediately so PUSH TO ALL can rebuild a complete list.
+                registerWithMaster(roleNumber,role)
+            end
+        else
+            -- Keep the Master's client registry alive even if the Master reboots.
+            registerWithMaster(roleNumber,role)
         end
     end
 end
@@ -249,6 +260,6 @@ else
     installRefreshRouter()
     parallel.waitForAny(
         function() shell.run(role.file) end,
-        masterPushListener
+        function() masterControlListener(roleNumber,role) end
     )
 end
