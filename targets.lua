@@ -182,7 +182,7 @@ return {
         }
     },
     ["mysticalagriculture:fire_essence"] = {
-        displayName = "Fair Essence",
+        displayName = "Fire Essence",
         target = 65500,
 
         machine = {
