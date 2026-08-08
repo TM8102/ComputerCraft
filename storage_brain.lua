@@ -1,8 +1,9 @@
 local controllerSide = "top"
 local modemSide = "back"
 
-local targetsAPI =
-    "https://api.github.com/repos/TM8102/ComputerCraft/contents/targets.lua?ref=main"
+local masterProtocol = "cc_master_update"
+local masterHostname = "master"
+local masterTimeout = 2
 
 local configFile = "targets.lua"
 local tempConfigFile = "targets_new.lua"
@@ -19,22 +20,13 @@ local remoteOfflineSeconds = 12
 
 local computerID = os.getComputerID()
 
-if not peripheral.isPresent(modemSide) then
-    error("No modem on " .. modemSide)
-end
+if not peripheral.isPresent(modemSide) then error("No modem on " .. modemSide) end
 rednet.open(modemSide)
 
-if not peripheral.isPresent(controllerSide) then
-    error("No Storage Controller on " .. controllerSide)
-end
-
+if not peripheral.isPresent(controllerSide) then error("No Storage Controller on " .. controllerSide) end
 local controller = peripheral.wrap(controllerSide)
-if not controller then
-    error("Could not wrap Storage Controller")
-end
-
-if type(controller.list) ~= "function"
-    and type(controller.tanks) ~= "function" then
+if not controller then error("Could not wrap Storage Controller") end
+if type(controller.list) ~= "function" and type(controller.tanks) ~= "function" then
     error("Storage Controller exposes neither list() nor tanks()")
 end
 
@@ -43,166 +35,95 @@ local remoteStorage = {}
 local itemDemand = {}
 local lastConfigStatus = "LOCAL"
 
-local validSides = {
-    top = true,
-    bottom = true,
-    left = true,
-    right = true,
-    front = true,
-    back = true
-}
+local validSides = {top=true,bottom=true,left=true,right=true,front=true,back=true}
 
 local function validateConfig(config)
-    if type(config) ~= "table" then
-        return false, "Config must return a table"
-    end
-
+    if type(config) ~= "table" then return false, "Config must return a table" end
     for itemID, settings in pairs(config) do
-        if type(itemID) ~= "string" then
-            return false, "Bad item ID"
-        end
-        if type(settings) ~= "table" then
-            return false, "Bad settings for " .. itemID
-        end
-
+        if type(itemID) ~= "string" then return false, "Bad item ID" end
+        if type(settings) ~= "table" then return false, "Bad settings for " .. itemID end
         settings.target = tonumber(settings.target)
-        if not settings.target or settings.target <= 0 then
-            return false, "Bad target for " .. itemID
-        end
-
+        if not settings.target or settings.target <= 0 then return false, "Bad target for " .. itemID end
         if settings.machine then
             local machine = settings.machine
             machine.computerID = tonumber(machine.computerID)
             machine.startBelow = tonumber(machine.startBelow) or 50
             machine.stopAt = tonumber(machine.stopAt) or 100
-
-            if not machine.computerID then
-                return false, "Bad computerID for " .. itemID
-            end
-            if type(machine.machineKey) ~= "string" or machine.machineKey == "" then
-                return false, "Bad machineKey for " .. itemID
-            end
-            if not validSides[machine.side] then
-                return false, "Bad machine side for " .. itemID
-            end
-            if machine.startBelow < 0 or machine.startBelow > 100 then
-                return false, "Bad startBelow for " .. itemID
-            end
-            if machine.stopAt <= 0 or machine.stopAt > 100 then
-                return false, "Bad stopAt for " .. itemID
-            end
-            if machine.stopAt <= machine.startBelow then
-                return false, "stopAt must exceed startBelow for " .. itemID
-            end
+            if not machine.computerID then return false, "Bad computerID for " .. itemID end
+            if type(machine.machineKey) ~= "string" or machine.machineKey == "" then return false, "Bad machineKey for " .. itemID end
+            if not validSides[machine.side] then return false, "Bad machine side for " .. itemID end
+            if machine.startBelow < 0 or machine.startBelow > 100 then return false, "Bad startBelow for " .. itemID end
+            if machine.stopAt <= 0 or machine.stopAt > 100 then return false, "Bad stopAt for " .. itemID end
+            if machine.stopAt <= machine.startBelow then return false, "stopAt must exceed startBelow for " .. itemID end
         end
     end
-
     return true
 end
 
 local function installConfig(contents)
-    if fs.exists(tempConfigFile) then
-        fs.delete(tempConfigFile)
-    end
-
+    if fs.exists(tempConfigFile) then fs.delete(tempConfigFile) end
     local file = fs.open(tempConfigFile, "w")
-    if not file then
-        return false, "COULD NOT WRITE TEMP CONFIG"
-    end
-    file.write(contents)
-    file.close()
-
+    if not file then return false, "COULD NOT WRITE TEMP CONFIG" end
+    file.write(contents); file.close()
     local ok, config = pcall(dofile, tempConfigFile)
-    if not ok then
-        fs.delete(tempConfigFile)
-        return false, "CONFIG ERROR: " .. tostring(config)
-    end
-
+    if not ok then fs.delete(tempConfigFile); return false, "CONFIG ERROR: " .. tostring(config) end
     local valid, validationError = validateConfig(config)
-    if not valid then
-        fs.delete(tempConfigFile)
-        return false, validationError
-    end
-
-    if fs.exists(configFile) then
-        fs.delete(configFile)
-    end
+    if not valid then fs.delete(tempConfigFile); return false, validationError end
+    if fs.exists(configFile) then fs.delete(configFile) end
     fs.move(tempConfigFile, configFile)
     itemConfig = config
-
-    for itemID in pairs(itemDemand) do
-        if not itemConfig[itemID] then
-            itemDemand[itemID] = nil
-        end
-    end
-
+    for itemID in pairs(itemDemand) do if not itemConfig[itemID] then itemDemand[itemID] = nil end end
     return true
 end
 
-local function downloadTargets()
-    local response, httpError = http.get(
-        targetsAPI,
-        {
-            ["User-Agent"] = "CC-Tweaked",
-            ["Accept"] = "application/vnd.github.raw+json",
-            ["Cache-Control"] = "no-cache"
-        }
-    )
-
-    if not response then
-        return false, "GITHUB API FAILED: " .. tostring(httpError)
+local function getMasterFile(fileName, fresh)
+    local masterID = rednet.lookup(masterProtocol, masterHostname)
+    if not masterID then return false, "MASTER CONTROLLER NOT FOUND" end
+    local requestID = tostring(computerID) .. ":" .. tostring(os.epoch("utc")) .. ":" .. fileName
+    rednet.send(masterID, {type="get_file",file=fileName,requestID=requestID,fresh=fresh==true}, masterProtocol)
+    local deadline = os.epoch("utc") + masterTimeout * 1000
+    while true do
+        local remaining = (deadline - os.epoch("utc")) / 1000
+        if remaining <= 0 then return false, "MASTER TIMEOUT" end
+        local senderID, message = rednet.receive(masterProtocol, remaining)
+        if not senderID then return false, "MASTER TIMEOUT" end
+        if senderID == masterID and type(message) == "table"
+            and message.type == "file_response" and message.requestID == requestID then
+            if not message.success then return false, message.error or "MASTER FILE ERROR" end
+            if type(message.contents) ~= "string" or message.contents == "" then return false, "MASTER RETURNED EMPTY FILE" end
+            return true, message.contents, masterID
+        end
     end
+end
 
-    local code = response.getResponseCode and response.getResponseCode() or 200
-    local contents = response.readAll()
-    response.close()
-
-    if code < 200 or code >= 300 then
-        return false, "GITHUB HTTP " .. tostring(code)
-    end
-    if not contents or contents == "" then
-        return false, "EMPTY GITHUB RESPONSE"
-    end
-
-    local ok, err = installConfig(contents)
-    if ok then
-        lastConfigStatus = "GITHUB API"
-    end
-    return ok, err
+local function downloadTargets(fresh)
+    local ok, contents, masterID = getMasterFile("targets.lua", fresh)
+    if not ok then return false, contents end
+    local installed, err = installConfig(contents)
+    if installed then lastConfigStatus = "MASTER " .. tostring(masterID) end
+    return installed, err
 end
 
 local function loadLocalConfig()
-    if not fs.exists(configFile) then
-        return false, "NO CONFIG"
-    end
-
+    if not fs.exists(configFile) then return false, "NO CONFIG" end
     local ok, config = pcall(dofile, configFile)
-    if not ok then
-        return false, tostring(config)
-    end
-
+    if not ok then return false, tostring(config) end
     local valid, validationError = validateConfig(config)
-    if not valid then
-        return false, validationError
-    end
-
+    if not valid then return false, validationError end
     itemConfig = config
     lastConfigStatus = "LOCAL CACHE"
     return true
 end
 
-local downloaded, downloadError = downloadTargets()
+local downloaded, downloadError = downloadTargets(false)
 if not downloaded then
-    print("GitHub update failed:")
+    print("Master config unavailable:")
     print(tostring(downloadError))
     print("Using local targets.lua...")
-
     local loaded, loadError = loadLocalConfig()
-    if not loaded then
-        error("Could not load targets.lua: " .. tostring(loadError))
-    end
+    if not loaded then error("Could not load targets.lua: " .. tostring(loadError)) end
 else
-    print("targets.lua updated from GitHub API.")
+    print("targets.lua updated from Master Controller.")
 end
 
 local function makeDisplayName(itemID)
@@ -213,364 +134,157 @@ local function makeDisplayName(itemID)
 end
 
 local function getDisplayName(itemID, settings)
-    if settings.displayName and settings.displayName ~= "" then
-        return settings.displayName
-    end
+    if settings.displayName and settings.displayName ~= "" then return settings.displayName end
     return makeDisplayName(itemID)
 end
 
 local function readController()
-    local amounts = {}
-    local readSomething = false
-    local errors = {}
-
+    local amounts = {}; local readSomething = false; local errors = {}
     if type(controller.list) == "function" then
         local ok, list = pcall(controller.list)
         if ok and type(list) == "table" then
             readSomething = true
             for _, stack in pairs(list) do
                 if type(stack) == "table" and type(stack.name) == "string" then
-                    amounts[stack.name] =
-                        (amounts[stack.name] or 0)
-                        + (tonumber(stack.count) or 0)
+                    amounts[stack.name] = (amounts[stack.name] or 0) + (tonumber(stack.count) or 0)
                 end
             end
-        else
-            errors[#errors + 1] = "ITEM READ FAILED"
-        end
+        else errors[#errors + 1] = "ITEM READ FAILED" end
     end
-
     if type(controller.tanks) == "function" then
         local ok, tanks = pcall(controller.tanks)
         if ok and type(tanks) == "table" then
             readSomething = true
             for _, tank in pairs(tanks) do
                 if type(tank) == "table" and type(tank.name) == "string" then
-                    amounts[tank.name] =
-                        (amounts[tank.name] or 0)
-                        + (tonumber(tank.amount) or 0)
+                    amounts[tank.name] = (amounts[tank.name] or 0) + (tonumber(tank.amount) or 0)
                 end
             end
-        else
-            errors[#errors + 1] = "FLUID READ FAILED"
-        end
+        else errors[#errors + 1] = "FLUID READ FAILED" end
     end
-
-    if not readSomething then
-        return nil, table.concat(errors, " | ")
-    end
-
+    if not readSomething then return nil, table.concat(errors, " | ") end
     return amounts
 end
 
 local function processRemoteInventory(senderID, message)
-    if senderID == computerID then
-        return
-    end
-
+    if senderID == computerID then return end
     local itemID = message.itemID or message.storageKey
-    if type(itemID) ~= "string" then
-        return
-    end
-
+    if type(itemID) ~= "string" then return end
     remoteStorage[senderID] = remoteStorage[senderID] or {}
-    remoteStorage[senderID][itemID] = {
-        amount = tonumber(message.amount) or 0,
-        lastUpdate = os.epoch("utc")
-    }
+    remoteStorage[senderID][itemID] = {amount=tonumber(message.amount) or 0,lastUpdate=os.epoch("utc")}
 end
 
 local function processRemoteManifest(senderID, message)
-    if senderID == computerID or type(message.enabledKeys) ~= "table" then
-        return
-    end
-
+    if senderID == computerID or type(message.enabledKeys) ~= "table" then return end
     remoteStorage[senderID] = remoteStorage[senderID] or {}
-    local enabled = {}
-    for _, itemID in ipairs(message.enabledKeys) do
-        enabled[itemID] = true
-    end
-
-    for itemID in pairs(remoteStorage[senderID]) do
-        if not enabled[itemID] then
-            remoteStorage[senderID][itemID] = nil
-        end
-    end
+    local enabled = {}; for _, itemID in ipairs(message.enabledKeys) do enabled[itemID] = true end
+    for itemID in pairs(remoteStorage[senderID]) do if not enabled[itemID] then remoteStorage[senderID][itemID] = nil end end
 end
 
 local function buildCombinedAmounts(localAmounts)
-    local totals = {}
-    for itemID in pairs(itemConfig) do
-        totals[itemID] = tonumber(localAmounts[itemID]) or 0
-    end
-
-    local now = os.epoch("utc")
+    local totals = {}; for itemID in pairs(itemConfig) do totals[itemID] = tonumber(localAmounts[itemID]) or 0 end
+    local current = os.epoch("utc")
     for _, items in pairs(remoteStorage) do
         for itemID, data in pairs(items) do
-            if itemConfig[itemID] then
-                local age = now - (data.lastUpdate or 0)
-                if age <= remoteOfflineSeconds * 1000 then
-                    totals[itemID] =
-                        (totals[itemID] or 0)
-                        + (tonumber(data.amount) or 0)
-                end
+            if itemConfig[itemID] and current - (data.lastUpdate or 0) <= remoteOfflineSeconds * 1000 then
+                totals[itemID] = (totals[itemID] or 0) + (tonumber(data.amount) or 0)
             end
         end
     end
-
     return totals
 end
 
 local function sendManifest()
-    local keys = {}
-    for itemID in pairs(itemConfig) do
-        keys[#keys + 1] = itemID
-    end
-    table.sort(keys)
-
-    rednet.broadcast({
-        messageType = "storage_manifest",
-        enabledKeys = keys,
-        role = "BRAIN",
-        computerID = computerID,
-        timestamp = os.epoch("utc")
-    }, storageStatusProtocol)
+    local keys = {}; for itemID in pairs(itemConfig) do keys[#keys + 1] = itemID end; table.sort(keys)
+    rednet.broadcast({messageType="storage_manifest",enabledKeys=keys,role="BRAIN",computerID=computerID,timestamp=os.epoch("utc")}, storageStatusProtocol)
 end
 
 local function sendStorageUpdate(itemID, amount, settings)
-    rednet.broadcast({
-        messageType = "inventory_update",
-        storageKey = itemID,
-        itemID = itemID,
-        displayName = getDisplayName(itemID, settings),
-        amount = tonumber(amount) or 0,
-        targetAmount = settings.target,
-        found = true,
-        online = true,
-        error = nil,
-        role = "BRAIN",
-        computerID = computerID,
-        timestamp = os.epoch("utc")
-    }, storageStatusProtocol)
+    rednet.broadcast({messageType="inventory_update",storageKey=itemID,itemID=itemID,displayName=getDisplayName(itemID,settings),amount=tonumber(amount) or 0,targetAmount=settings.target,found=true,online=true,error=nil,role="BRAIN",computerID=computerID,timestamp=os.epoch("utc")}, storageStatusProtocol)
 end
 
 local function updateItemDemand(itemID, amount, settings)
     local machine = settings.machine
-    if not machine then
-        itemDemand[itemID] = nil
-        return false, 0
-    end
-
+    if not machine then itemDemand[itemID] = nil; return false, 0 end
     local percentage = (amount / settings.target) * 100
     local wants = itemDemand[itemID] == true
-
-    if wants then
-        if percentage >= machine.stopAt then
-            wants = false
-        end
-    elseif percentage < machine.startBelow then
-        wants = true
-    end
-
+    if wants then if percentage >= machine.stopAt then wants = false end
+    elseif percentage < machine.startBelow then wants = true end
     itemDemand[itemID] = wants
     return wants, percentage
 end
 
 local function sendGroupedMachineCommands(combined)
     local groups = {}
-
     for itemID, settings in pairs(itemConfig) do
         if settings.machine then
             local machine = settings.machine
-            local wants, percentage = updateItemDemand(
-                itemID,
-                tonumber(combined[itemID]) or 0,
-                settings
-            )
-
+            local wants, percentage = updateItemDemand(itemID, tonumber(combined[itemID]) or 0, settings)
             local groupKey = tostring(machine.computerID) .. ":" .. machine.side
             local group = groups[groupKey]
-            if not group then
-                group = {
-                    computerID = machine.computerID,
-                    side = machine.side,
-                    state = false,
-                    itemIDs = {},
-                    machineKeys = {},
-                    percentages = {},
-                    amounts = {},
-                    targets = {}
-                }
-                groups[groupKey] = group
-            end
-
-            if wants then
-                group.state = true
-            end
-            group.itemIDs[#group.itemIDs + 1] = itemID
-            group.machineKeys[#group.machineKeys + 1] = machine.machineKey
-            group.percentages[itemID] = percentage
-            group.amounts[itemID] = tonumber(combined[itemID]) or 0
-            group.targets[itemID] = settings.target
+            if not group then group={computerID=machine.computerID,side=machine.side,state=false,itemIDs={},machineKeys={},percentages={},amounts={},targets={}}; groups[groupKey]=group end
+            if wants then group.state = true end
+            group.itemIDs[#group.itemIDs+1]=itemID; group.machineKeys[#group.machineKeys+1]=machine.machineKey
+            group.percentages[itemID]=percentage; group.amounts[itemID]=tonumber(combined[itemID]) or 0; group.targets[itemID]=settings.target
         end
     end
-
     for _, group in pairs(groups) do
-        rednet.send(group.computerID, {
-            command = "auto_set",
-            side = group.side,
-            state = group.state,
-            itemIDs = group.itemIDs,
-            machineKeys = group.machineKeys,
-            percentages = group.percentages,
-            amounts = group.amounts,
-            targets = group.targets,
-            timestamp = os.epoch("utc")
-        }, machineControlProtocol)
+        rednet.send(group.computerID,{command="auto_set",side=group.side,state=group.state,itemIDs=group.itemIDs,machineKeys=group.machineKeys,percentages=group.percentages,amounts=group.amounts,targets=group.targets,timestamp=os.epoch("utc")},machineControlProtocol)
     end
 end
 
 local function automationCycle()
-    local localAmounts, readError = readController()
-    if not localAmounts then
-        return false, readError
-    end
-
+    local localAmounts, readError = readController(); if not localAmounts then return false, readError end
     sendManifest()
-    for itemID, settings in pairs(itemConfig) do
-        sendStorageUpdate(
-            itemID,
-            tonumber(localAmounts[itemID]) or 0,
-            settings
-        )
-    end
-
-    local combined = buildCombinedAmounts(localAmounts)
-    sendGroupedMachineCommands(combined)
+    for itemID, settings in pairs(itemConfig) do sendStorageUpdate(itemID, tonumber(localAmounts[itemID]) or 0, settings) end
+    sendGroupedMachineCommands(buildCombinedAmounts(localAmounts))
     return true
 end
 
 local function sendRefreshStatus(success, errorMessage)
-    rednet.broadcast({
-        command = "targets_refresh_status",
-        success = success == true,
-        error = errorMessage,
-        role = "BRAIN",
-        computerID = computerID,
-        timestamp = os.epoch("utc")
-    }, configStatusProtocol)
+    rednet.broadcast({command="targets_refresh_status",success=success==true,error=errorMessage,role="BRAIN",computerID=computerID,timestamp=os.epoch("utc")},configStatusProtocol)
 end
 
 local function forceTargetsRefresh()
-    local success, refreshError = downloadTargets()
-    if not success then
-        sendRefreshStatus(false, refreshError)
-        return false
-    end
-
-    automationCycle()
-    sendRefreshStatus(true, nil)
-    return true
+    local success, refreshError = downloadTargets(true)
+    if not success then sendRefreshStatus(false, refreshError); return false end
+    automationCycle(); sendRefreshStatus(true,nil); return true
 end
 
 local function drawLocalScreen()
-    term.setBackgroundColor(colors.black)
-    term.setTextColor(colors.white)
-    term.clear()
-    term.setCursorPos(1, 1)
-
-    print("FUNCTIONAL STORAGE BRAIN")
-    print("========================")
-    print("Computer: " .. computerID)
-    print("Controller: " .. string.upper(controllerSide))
-    print("Config: " .. lastConfigStatus)
-    print("")
-
+    term.setBackgroundColor(colors.black); term.setTextColor(colors.white); term.clear(); term.setCursorPos(1,1)
+    print("FUNCTIONAL STORAGE BRAIN"); print("========================"); print("Computer: "..computerID); print("Controller: "..string.upper(controllerSide)); print("Config: "..lastConfigStatus); print("")
     local localAmounts, readError = readController()
-    if not localAmounts then
-        term.setTextColor(colors.red)
-        print("CONTROLLER ERROR")
-        print(tostring(readError))
-        return
-    end
-
-    local combined = buildCombinedAmounts(localAmounts)
-    local sorted = {}
-    for itemID in pairs(itemConfig) do
-        sorted[#sorted + 1] = itemID
-    end
-    table.sort(sorted)
-
-    for index = 1, math.min(#sorted, 8) do
-        local itemID = sorted[index]
-        local settings = itemConfig[itemID]
-        print(getDisplayName(itemID, settings))
-        print(" " .. math.floor(combined[itemID] or 0) .. " / " .. math.floor(settings.target))
-        if itemDemand[itemID] then
-            term.setTextColor(colors.lime)
-            print(" MACHINE REQUESTED")
-            term.setTextColor(colors.white)
-        end
+    if not localAmounts then term.setTextColor(colors.red); print("CONTROLLER ERROR"); print(tostring(readError)); return end
+    local combined = buildCombinedAmounts(localAmounts); local sorted={}; for itemID in pairs(itemConfig) do sorted[#sorted+1]=itemID end; table.sort(sorted)
+    for index=1,math.min(#sorted,8) do
+        local itemID=sorted[index]; local settings=itemConfig[itemID]
+        print(getDisplayName(itemID,settings)); print(" "..math.floor(combined[itemID] or 0).." / "..math.floor(settings.target))
+        if itemDemand[itemID] then term.setTextColor(colors.lime); print(" MACHINE REQUESTED"); term.setTextColor(colors.white) end
         print("")
     end
 end
 
-local function automationLoop()
-    while true do
-        automationCycle()
-        sleep(updateInterval)
-    end
-end
-
-local function displayLoop()
-    while true do
-        drawLocalScreen()
-        sleep(1)
-    end
-end
-
+local function automationLoop() while true do automationCycle(); sleep(updateInterval) end end
+local function displayLoop() while true do drawLocalScreen(); sleep(1) end end
 local function configLoop()
     while true do
         sleep(configUpdateInterval)
-        local success, configError = downloadTargets()
-        if success then
-            automationCycle()
-        else
-            print("GitHub update failed:")
-            print(tostring(configError))
-        end
+        local success, configError = downloadTargets(false)
+        if success then automationCycle() else print("Master config update failed:"); print(tostring(configError)) end
     end
 end
 
 local function networkLoop()
     while true do
         local senderID, message, protocol = rednet.receive()
-
         if protocol == storageStatusProtocol and type(message) == "table" then
-            if message.messageType == "inventory_update" then
-                processRemoteInventory(senderID, message)
-            elseif message.messageType == "storage_manifest" then
-                processRemoteManifest(senderID, message)
-            end
-
-        elseif protocol == storageControlProtocol
-            and type(message) == "table"
-            and message.command == "discover" then
-            automationCycle()
-
-        elseif protocol == configControlProtocol
-            and type(message) == "table"
-            and message.command == "force_targets_refresh" then
-            forceTargetsRefresh()
-        end
+            if message.messageType == "inventory_update" then processRemoteInventory(senderID,message)
+            elseif message.messageType == "storage_manifest" then processRemoteManifest(senderID,message) end
+        elseif protocol == storageControlProtocol and type(message)=="table" and message.command=="discover" then automationCycle()
+        elseif protocol == configControlProtocol and type(message)=="table" and message.command=="force_targets_refresh" then forceTargetsRefresh() end
     end
 end
 
 automationCycle()
-
-parallel.waitForAll(
-    automationLoop,
-    networkLoop,
-    configLoop,
-    displayLoop
-)
+parallel.waitForAll(automationLoop,networkLoop,configLoop,displayLoop)
