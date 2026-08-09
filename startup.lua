@@ -5,7 +5,7 @@
 -- updated one-at-a-time instead of all at once.
 -- The startup listener also accepts PUSH ALL from the Master.
 -- Clients heartbeat/register so the Master always knows them.
--- Master also runs web_status_publisher.lua for GitHub Pages.
+-- Master also runs web status + web control services.
 -- =========================================================
 
 local masterProtocol = "cc_master_update"
@@ -14,6 +14,7 @@ local roleFile = ".computer_role"
 local masterTimeout = 3
 local heartbeatSeconds = 10
 local webPublisherFile = "web_status_publisher.lua"
+local webControlFile = "web_control_bridge.lua"
 
 local roles = {
     ["1"] = { name="MAIN STORAGE SCREEN", file="main_storage.lua" },
@@ -159,19 +160,13 @@ local function installRefreshRouter()
         if type(message)=="table" then
             if protocol=="config_control" and message.command=="force_targets_refresh" then
                 return originalBroadcast({
-                    type="sequential_refresh",
-                    kind="targets",
-                    requester=os.getComputerID(),
-                    originalMessage=message,
-                    timestamp=os.epoch("utc")
+                    type="sequential_refresh", kind="targets", requester=os.getComputerID(),
+                    originalMessage=message, timestamp=os.epoch("utc")
                 },masterProtocol)
             elseif protocol=="spawner_config_control" and message.command=="force_spawners_refresh" then
                 return originalBroadcast({
-                    type="sequential_refresh",
-                    kind="spawners",
-                    requester=os.getComputerID(),
-                    originalMessage=message,
-                    timestamp=os.epoch("utc")
+                    type="sequential_refresh", kind="spawners", requester=os.getComputerID(),
+                    originalMessage=message, timestamp=os.epoch("utc")
                 },masterProtocol)
             end
         end
@@ -181,8 +176,7 @@ end
 
 local function masterControlListener(roleNumber,role)
     while true do
-        local senderID,message,protocol=rednet.receive(masterProtocol,heartbeatSeconds)
-
+        local senderID,message=rednet.receive(masterProtocol,heartbeatSeconds)
         if senderID and type(message)=="table" then
             if message.type=="push_update" then
                 clearScreen()
@@ -192,7 +186,6 @@ local function masterControlListener(roleNumber,role)
                 print("Rebooting to pull latest files...")
                 sleep(0.35)
                 os.reboot()
-
             elseif message.type=="discover_clients" then
                 registerWithMaster(roleNumber,role)
             end
@@ -218,6 +211,7 @@ local success,sourceOrError
 if role.master then
     print("Master bootstrap: GitHub RAW")
     success,sourceOrError=downloadFromRawGitHub(role.file)
+
     local webOK,webSource=downloadFromRawGitHub(webPublisherFile)
     if webOK then
         print("Web publisher updated from "..tostring(webSource))
@@ -225,9 +219,15 @@ if role.master then
         term.setTextColor(colors.orange)
         print("Web publisher update failed: "..tostring(webSource))
         term.setTextColor(colors.white)
-        if not fs.exists(webPublisherFile) then
-            print("Web dashboard publisher will be unavailable this boot.")
-        end
+    end
+
+    local ctlOK,ctlSource=downloadFromRawGitHub(webControlFile)
+    if ctlOK then
+        print("Web control updated from "..tostring(ctlSource))
+    else
+        term.setTextColor(colors.orange)
+        print("Web control update failed: "..tostring(ctlSource))
+        term.setTextColor(colors.white)
     end
 else
     print("Looking for Master Controller...")
@@ -263,14 +263,10 @@ print("Starting "..role.file.."...")
 sleep(0.5)
 
 if role.master then
-    if fs.exists(webPublisherFile) then
-        parallel.waitForAny(
-            function() shell.run(role.file) end,
-            function() shell.run(webPublisherFile) end
-        )
-    else
-        shell.run(role.file)
-    end
+    local tasks={function() shell.run(role.file) end}
+    if fs.exists(webPublisherFile) then tasks[#tasks+1]=function() shell.run(webPublisherFile) end end
+    if fs.exists(webControlFile) then tasks[#tasks+1]=function() shell.run(webControlFile) end end
+    parallel.waitForAny(table.unpack(tasks))
 else
     openAnyModem()
     registerWithMaster(roleNumber,role)
