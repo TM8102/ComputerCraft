@@ -113,7 +113,7 @@ local function getStatusSha()
     if not response.code or response.code<200 or response.code>=300 then
         return false,"GET STATUS HTTP "..tostring(response.code or "?")
     end
-    local ok,data=pcall(textutils.unserialiseJSON,response.body)
+    local ok,data=pcall(textutils.unserializeJSON,response.body)
     if not ok or type(data)~="table" or type(data.sha)~="string" then
         return false,"COULD NOT READ status.json SHA"
     end
@@ -194,7 +194,7 @@ end
 local function buildResources()
     local time=now()
     local combined={}
-    for sourceID,source in pairs(storageSources) do
+    for _,source in pairs(storageSources) do
         for itemID,data in pairs(source) do
             local age=time-(data.lastUpdate or 0)
             if age>sourceRemoveSeconds*1000 then
@@ -287,8 +287,8 @@ local function publishSnapshot()
     end
 
     local snapshot=buildSnapshot()
-    local json=textutils.serialiseJSON(snapshot)
-    local body=textutils.serialiseJSON({
+    local json=textutils.serializeJSON(snapshot)
+    local body=textutils.serializeJSON({
         message="Update live ComputerCraft status",
         content=base64(json),
         sha=statusSha,
@@ -304,7 +304,7 @@ local function publishSnapshot()
         return false,"PUBLISH HTTP "..tostring(response.code or "?").." "..tostring(err or "")
     end
 
-    local ok,data=pcall(textutils.unserialiseJSON,response.body)
+    local ok,data=pcall(textutils.unserializeJSON,response.body)
     if ok and type(data)=="table" and type(data.content)=="table" and type(data.content.sha)=="string" then
         statusSha=data.content.sha
     else
