@@ -195,6 +195,25 @@ local function masterControlListener(roleNumber,role)
     end
 end
 
+local function superviseService(file,label)
+    while true do
+        if not fs.exists(file) then
+            term.setTextColor(colors.orange)
+            print(label.." missing; retrying in 5s")
+            term.setTextColor(colors.white)
+            sleep(5)
+        else
+            local ok=shell.run(file)
+            term.setTextColor(colors.red)
+            print(label.." STOPPED"..(ok==false and " / ERROR" or ""))
+            term.setTextColor(colors.orange)
+            print("Restarting "..label.." in 2 seconds...")
+            term.setTextColor(colors.white)
+            sleep(2)
+        end
+    end
+end
+
 clearScreen()
 local roleNumber=loadRole() or chooseRole()
 local role=roles[roleNumber]
@@ -213,21 +232,15 @@ if role.master then
     success,sourceOrError=downloadFromRawGitHub(role.file)
 
     local webOK,webSource=downloadFromRawGitHub(webPublisherFile)
-    if webOK then
-        print("Web publisher updated from "..tostring(webSource))
+    if webOK then print("Web publisher updated from "..tostring(webSource))
     else
-        term.setTextColor(colors.orange)
-        print("Web publisher update failed: "..tostring(webSource))
-        term.setTextColor(colors.white)
+        term.setTextColor(colors.orange); print("Web publisher update failed: "..tostring(webSource)); term.setTextColor(colors.white)
     end
 
     local ctlOK,ctlSource=downloadFromRawGitHub(webControlFile)
-    if ctlOK then
-        print("Web control updated from "..tostring(ctlSource))
+    if ctlOK then print("Web control updated from "..tostring(ctlSource))
     else
-        term.setTextColor(colors.orange)
-        print("Web control update failed: "..tostring(ctlSource))
-        term.setTextColor(colors.white)
+        term.setTextColor(colors.orange); print("Web control update failed: "..tostring(ctlSource)); term.setTextColor(colors.white)
     end
 else
     print("Looking for Master Controller...")
@@ -242,16 +255,11 @@ else
 end
 
 if success then
-    term.setTextColor(colors.lime)
-    print("Updated from "..tostring(sourceOrError))
-    term.setTextColor(colors.white)
+    term.setTextColor(colors.lime); print("Updated from "..tostring(sourceOrError)); term.setTextColor(colors.white)
 else
-    term.setTextColor(colors.orange)
-    print("UPDATE FAILED")
-    term.setTextColor(colors.white)
+    term.setTextColor(colors.orange); print("UPDATE FAILED"); term.setTextColor(colors.white)
     print(tostring(sourceOrError)); print("")
-    if fs.exists(role.file) then
-        print("Using existing local copy.")
+    if fs.exists(role.file) then print("Using existing local copy.")
     else
         term.setTextColor(colors.red); print("No local copy available."); term.setTextColor(colors.white)
         return
@@ -263,10 +271,19 @@ print("Starting "..role.file.."...")
 sleep(0.5)
 
 if role.master then
-    local tasks={function() shell.run(role.file) end}
-    if fs.exists(webPublisherFile) then tasks[#tasks+1]=function() shell.run(webPublisherFile) end end
-    if fs.exists(webControlFile) then tasks[#tasks+1]=function() shell.run(webControlFile) end end
-    parallel.waitForAny(table.unpack(tasks))
+    -- Every Master service is supervised independently. A web-service crash
+    -- can no longer terminate the Master Controller and take the whole
+    -- ComputerCraft network offline.
+    local tasks={
+        function() superviseService(role.file,"MASTER CONTROLLER") end
+    }
+    if fs.exists(webPublisherFile) then
+        tasks[#tasks+1]=function() superviseService(webPublisherFile,"WEB STATUS") end
+    end
+    if fs.exists(webControlFile) then
+        tasks[#tasks+1]=function() superviseService(webControlFile,"WEB CONTROL") end
+    end
+    parallel.waitForAll(table.unpack(tasks))
 else
     openAnyModem()
     registerWithMaster(roleNumber,role)

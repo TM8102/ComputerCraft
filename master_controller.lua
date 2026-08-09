@@ -3,6 +3,8 @@
 -- 4-wide x 1-tall TOP monitor.
 -- Central GitHub cache, detailed refresh diagnostics,
 -- sequential config refreshes, push-all, linked-computer list.
+-- Scheduled GitHub refresh automatically pushes clients when
+-- one or more managed files actually changed.
 -- =========================================================
 
 local protocol="cc_master_update"
@@ -31,6 +33,7 @@ local lastRefresh=0
 local lastRefreshError=nil
 local lastFailures={}
 local lastSuccesses={}
+local lastChangedFiles={}
 local githubToken=nil
 local githubRateLimit=nil
 local githubRateRemaining=nil
@@ -183,7 +186,7 @@ local function downloadFromGitHub(file)
         cacheStatus[file]=cacheStatus[file] or {}
         cacheStatus[file].lastError=reason
         cacheStatus[file].lastAttempt=now()
-        return false,reason
+        return false,reason,false
     end
 
     updateRateInfo(response)
@@ -198,7 +201,7 @@ local function downloadFromGitHub(file)
         cacheStatus[file]=cacheStatus[file] or {}
         cacheStatus[file].lastError=reason
         cacheStatus[file].lastAttempt=now()
-        return false,reason
+        return false,reason,false
     end
 
     githubAuthStatus=(githubToken and githubToken~="") and "AUTHENTICATED" or "UNAUTHENTICATED"
@@ -208,7 +211,7 @@ local function downloadFromGitHub(file)
         cacheStatus[file]=cacheStatus[file] or {}
         cacheStatus[file].lastError=reason
         cacheStatus[file].lastAttempt=now()
-        return false,reason
+        return false,reason,false
     end
 
     if tostring(file):sub(-4)==".lua" then
@@ -218,9 +221,12 @@ local function downloadFromGitHub(file)
             cacheStatus[file]=cacheStatus[file] or {}
             cacheStatus[file].lastError=reason
             cacheStatus[file].lastAttempt=now()
-            return false,reason
+            return false,reason,false
         end
     end
+
+    local previous=cache[file]
+    local changed=previous~=nil and previous~=data
 
     cache[file]=data
     cacheStatus[file]={
@@ -228,15 +234,16 @@ local function downloadFromGitHub(file)
         updated=now(),
         lastAttempt=now(),
         bytes=#data,
-        lastError=nil
+        lastError=nil,
+        changed=changed
     }
 
     if not writeFile(cachePath(file),data) then
         cacheStatus[file].lastError="CACHE WRITE FAILED"
-        return false,"CACHE WRITE FAILED"
+        return false,"CACHE WRITE FAILED",false
     end
 
-    return true
+    return true,nil,changed
 end
 
 local function refreshFile(file)
@@ -251,7 +258,7 @@ local function refreshFileIfNeeded(file,forceFresh)
     return refreshFile(file)
 end
 
-local function printRefreshReport(successes,failures)
+local function printRefreshReport(successes,failures,changedFiles)
     term.setBackgroundColor(colors.black)
     term.setTextColor(colors.white)
     print("")
@@ -260,6 +267,13 @@ local function printRefreshReport(successes,failures)
     term.setTextColor(#failures==0 and colors.lime or colors.orange)
     print("Updated: "..successes.." / "..#managedFiles)
     term.setTextColor(colors.white)
+    print("Changed: "..#(changedFiles or {}))
+
+    if changedFiles and #changedFiles>0 then
+        term.setTextColor(colors.cyan)
+        for _,file in ipairs(changedFiles) do print("  * "..file) end
+        term.setTextColor(colors.white)
+    end
 
     if #failures==0 then
         term.setTextColor(colors.lime)
@@ -294,13 +308,15 @@ local function refreshAll(showTerminalReport)
     local successes=0
     local failures={}
     local successFiles={}
+    local changedFiles={}
 
     for index,file in ipairs(managedFiles) do
         lastAction="GITHUB "..index.."/"..#managedFiles.." "..file
-        local ok,err=refreshFile(file)
+        local ok,err,changed=refreshFile(file)
         if ok then
             successes=successes+1
             successFiles[#successFiles+1]=file
+            if changed then changedFiles[#changedFiles+1]=file end
         else
             failures[#failures+1]={
                 file=file,
@@ -314,26 +330,25 @@ local function refreshAll(showTerminalReport)
     lastRefresh=now()
     lastFailures=failures
     lastSuccesses=successFiles
+    lastChangedFiles=changedFiles
     failureDisplayIndex=1
     failureDisplayChanged=now()
 
     if #failures>0 then
         local compact={}
-        for _,f in ipairs(failures) do
-            compact[#compact+1]=f.file..": "..f.error
-        end
+        for _,f in ipairs(failures) do compact[#compact+1]=f.file..": "..f.error end
         lastRefreshError=table.concat(compact," | ")
         lastAction="GITHUB FAILED "..#failures.." FILE"..(#failures==1 and "" or "S")
+    elseif #changedFiles>0 then
+        lastRefreshError=nil
+        lastAction="GITHUB CHANGED "..#changedFiles
     else
         lastRefreshError=nil
-        lastAction="GITHUB ALL "..successes.." OK"
+        lastAction="GITHUB NO CHANGES"
     end
 
-    if showTerminalReport then
-        printRefreshReport(successes,failures)
-    end
-
-    return successes,failures
+    if showTerminalReport then printRefreshReport(successes,failures,changedFiles) end
+    return successes,failures,changedFiles
 end
 
 local function rememberClient(id,message)
@@ -351,81 +366,33 @@ local function rememberClient(id,message)
 end
 
 local function linkedComputerList()
-    local list={{
-        id=computerID,
-        roleNumber="9",
-        roleName="MASTER CONTROLLER",
-        roleFile="master_controller.lua",
-        refreshGroup=nil,
-        lastSeen=now(),
-        isMaster=true
-    }}
-
+    local list={{id=computerID,roleNumber="9",roleName="MASTER CONTROLLER",roleFile="master_controller.lua",refreshGroup=nil,lastSeen=now(),isMaster=true}}
     for id,info in pairs(clients) do
         if id~=computerID then
-            list[#list+1]={
-                id=id,
-                roleNumber=info.roleNumber,
-                roleName=info.roleName or "UNKNOWN",
-                roleFile=info.roleFile,
-                refreshGroup=info.refreshGroup,
-                lastSeen=info.lastSeen or 0,
-                isMaster=false
-            }
+            list[#list+1]={id=id,roleNumber=info.roleNumber,roleName=info.roleName or "UNKNOWN",roleFile=info.roleFile,refreshGroup=info.refreshGroup,lastSeen=info.lastSeen or 0,isMaster=false}
         end
     end
-
     table.sort(list,function(a,b) return tonumber(a.id)<tonumber(b.id) end)
     return list
 end
 
 local function sendLinkedComputers(targetID,requestID)
-    rednet.send(targetID,{
-        type="linked_computers_response",
-        requestID=requestID,
-        masterID=computerID,
-        timestamp=now(),
-        computers=linkedComputerList()
-    },protocol)
+    rednet.send(targetID,{type="linked_computers_response",requestID=requestID,masterID=computerID,timestamp=now(),computers=linkedComputerList()},protocol)
 end
 
 local function sendFile(targetID,file,requestID,forceFresh)
     local refreshed,refreshError=refreshFileIfNeeded(file,forceFresh==true)
     local data=cache[file]
-
     if not data then
-        rednet.send(targetID,{
-            type="file_response",
-            requestID=requestID,
-            file=file,
-            success=false,
-            error=refreshError or "FILE NOT CACHED",
-            masterID=computerID
-        },protocol)
+        rednet.send(targetID,{type="file_response",requestID=requestID,file=file,success=false,error=refreshError or "FILE NOT CACHED",masterID=computerID},protocol)
         return
     end
-
-    rednet.send(targetID,{
-        type="file_response",
-        requestID=requestID,
-        file=file,
-        success=true,
-        contents=data,
-        bytes=#data,
-        masterID=computerID,
-        cachedAt=cacheStatus[file] and cacheStatus[file].updated or 0,
-        refreshError=refreshed and nil or refreshError
-    },protocol)
+    rednet.send(targetID,{type="file_response",requestID=requestID,file=file,success=true,contents=data,bytes=#data,masterID=computerID,cachedAt=cacheStatus[file] and cacheStatus[file].updated or 0,refreshError=refreshed and nil or refreshError},protocol)
 end
 
 local function queueSequentialRefresh(senderID,message)
     if message.kind~="targets" and message.kind~="spawners" then return end
-    refreshQueue[#refreshQueue+1]={
-        kind=message.kind,
-        requester=message.requester or senderID,
-        originalMessage=message.originalMessage or {},
-        queuedAt=now()
-    }
+    refreshQueue[#refreshQueue+1]={kind=message.kind,requester=message.requester or senderID,originalMessage=message.originalMessage or {},queuedAt=now()}
     lastAction=string.upper(message.kind).." QUEUED"
 end
 
@@ -434,7 +401,6 @@ local function networkLoop()
         local senderID,message,incomingProtocol=rednet.receive()
         if incomingProtocol==protocol and type(message)=="table" then
             if message.type~="get_linked_computers" then rememberClient(senderID,message) end
-
             if message.type=="discover_master" then
                 rednet.send(senderID,{type="master_hello",masterID=computerID,timestamp=now()},protocol)
             elseif message.type=="register_client" then
@@ -445,23 +411,10 @@ local function networkLoop()
                 sendFile(senderID,message.file,message.requestID,message.fresh)
             elseif message.type=="refresh_file" and type(message.file)=="string" then
                 local ok,err=refreshFile(message.file)
-                rednet.send(senderID,{
-                    type="refresh_result",
-                    file=message.file,
-                    success=ok,
-                    error=err,
-                    masterID=computerID
-                },protocol)
+                rednet.send(senderID,{type="refresh_result",file=message.file,success=ok,error=err,masterID=computerID},protocol)
             elseif message.type=="refresh_all" then
-                local successes,failures=refreshAll(false)
-                rednet.send(senderID,{
-                    type="refresh_all_result",
-                    success=#failures==0,
-                    updated=successes,
-                    failed=#failures,
-                    errors=failures,
-                    masterID=computerID
-                },protocol)
+                local successes,failures,changedFiles=refreshAll(false)
+                rednet.send(senderID,{type="refresh_all_result",success=#failures==0,updated=successes,failed=#failures,changed=#changedFiles,changedFiles=changedFiles,errors=failures,masterID=computerID},protocol)
             elseif message.type=="sequential_refresh" then
                 queueSequentialRefresh(senderID,message)
             end
@@ -471,9 +424,7 @@ end
 
 local function clientIDsForGroup(group)
     local ids={}
-    for id,info in pairs(clients) do
-        if info.refreshGroup==group then ids[#ids+1]=id end
-    end
+    for id,info in pairs(clients) do if info.refreshGroup==group then ids[#ids+1]=id end end
     table.sort(ids)
     return ids
 end
@@ -483,20 +434,14 @@ local function waitForNodeReply(targetID,statusProtocol,replyCommand,timeoutSeco
     while true do
         local event,a,b,c=os.pullEvent()
         if event=="rednet_message" then
-            if a==targetID and c==statusProtocol and type(b)=="table" and b.command==replyCommand then
-                return true,b
-            end
-        elseif event=="timer" and a==timer then
-            return false,nil
-        end
+            if a==targetID and c==statusProtocol and type(b)=="table" and b.command==replyCommand then return true,b end
+        elseif event=="timer" and a==timer then return false,nil end
     end
 end
 
 local function sequentialRefreshLoop()
     while true do
-        if #refreshQueue==0 then
-            sleep(0.1)
-        else
+        if #refreshQueue==0 then sleep(0.1) else
             activeRefreshJob=table.remove(refreshQueue,1)
             local job=activeRefreshJob
             local group=job.kind
@@ -505,59 +450,67 @@ local function sequentialRefreshLoop()
             local statusProtocol=group=="targets" and "config_status" or "spawner_config_status"
             local replyCommand=group=="targets" and "targets_refresh_status" or "spawners_refresh_status"
             local ids=clientIDsForGroup(group)
-
             lastAction=string.upper(group).." -> GITHUB"
             local configOK,configErr=refreshFile(configFile)
-            if not configOK then
-                lastAction=string.upper(group).." CONFIG FAIL: "..tostring(configErr)
-            end
-
-            job.total=#ids
-            job.done=0
-            job.current=nil
-            job.timeouts=0
-
+            if not configOK then lastAction=string.upper(group).." CONFIG FAIL: "..tostring(configErr) end
+            job.total=#ids; job.done=0; job.current=nil; job.timeouts=0
             for _,id in ipairs(ids) do
                 job.current=id
                 lastAction=string.upper(group).." PC "..id.." "..(job.done+1).."/"..job.total
-
                 local outgoing={}
                 for k,v in pairs(job.originalMessage or {}) do outgoing[k]=v end
                 outgoing.command=group=="targets" and "force_targets_refresh" or "force_spawners_refresh"
                 outgoing.masterSequential=true
                 outgoing.batchTimestamp=job.queuedAt
-
                 rednet.send(id,outgoing,controlProtocol)
                 local replied=waitForNodeReply(id,statusProtocol,replyCommand,nodeRefreshTimeout)
                 if not replied then job.timeouts=job.timeouts+1 end
                 job.done=job.done+1
                 sleep(0.08)
             end
-
-            lastAction=string.upper(group).." DONE "..job.done.."/"..job.total
-                ..(job.timeouts>0 and " T/O "..job.timeouts or "")
+            lastAction=string.upper(group).." DONE "..job.done.."/"..job.total..(job.timeouts>0 and " T/O "..job.timeouts or "")
             activeRefreshJob=nil
         end
     end
 end
 
-local function refreshLoop()
-    while true do
-        sleep(refreshInterval)
-        refreshAll(false)
-    end
-end
-
-local function buildPushQueue()
+local function buildPushQueue(reason)
+    if pushRunning then return false end
     pushQueue={}
-    for id in pairs(clients) do
-        if id~=computerID then pushQueue[#pushQueue+1]=id end
-    end
+    for id in pairs(clients) do if id~=computerID then pushQueue[#pushQueue+1]=id end end
     table.sort(pushQueue)
     pushTotal=#pushQueue
     pushDone=0
     pushRunning=pushTotal>0
-    lastAction=pushRunning and ("PUSH QUEUED "..pushTotal) or "NO CLIENTS"
+    if pushRunning then
+        lastAction=(reason or "PUSH").." QUEUED "..pushTotal
+    else
+        lastAction="NO CLIENTS"
+    end
+    return pushRunning
+end
+
+local function refreshLoop()
+    while true do
+        sleep(refreshInterval)
+        local _,_,changedFiles=refreshAll(false)
+        if #changedFiles>0 then
+            term.setTextColor(colors.cyan)
+            print("")
+            print("AUTO REFRESH DETECTED CHANGES: "..#changedFiles)
+            for _,file in ipairs(changedFiles) do print("  * "..file) end
+            term.setTextColor(colors.white)
+            if not pushRunning then
+                if buildPushQueue("AUTO PUSH") then
+                    print("Automatically pushing updates to "..pushTotal.." clients.")
+                else
+                    print("No linked clients available for automatic push.")
+                end
+            else
+                print("Push already running; automatic push not duplicated.")
+            end
+        end
+    end
 end
 
 local function pushLoop()
@@ -572,46 +525,33 @@ local function pushLoop()
                 pushRunning=false
                 lastAction="PUSH DONE "..pushDone.."/"..pushTotal
             end
-        else
-            sleep(0.1)
-        end
+        else sleep(0.1) end
     end
 end
 
 local function fill(x1,y1,x2,y2,color)
     if x2<x1 or y2<y1 then return end
     monitor.setBackgroundColor(color)
-    for y=y1,y2 do
-        monitor.setCursorPos(x1,y)
-        monitor.write(string.rep(" ",x2-x1+1))
-    end
+    for y=y1,y2 do monitor.setCursorPos(x1,y); monitor.write(string.rep(" ",x2-x1+1)) end
 end
 
 local function center(x1,x2,y,text,fg,bg)
     text=short(text,x2-x1+1)
     monitor.setCursorPos(x1+math.floor(((x2-x1+1)-#text)/2),y)
-    monitor.setTextColor(fg)
-    monitor.setBackgroundColor(bg)
-    monitor.write(text)
+    monitor.setTextColor(fg); monitor.setBackgroundColor(bg); monitor.write(text)
 end
 
 local function writeAt(x,y,text,fg,bg,maxWidth)
     text=tostring(text or "")
     if maxWidth then text=short(text,maxWidth) end
-    monitor.setCursorPos(x,y)
-    monitor.setTextColor(fg)
-    monitor.setBackgroundColor(bg)
-    monitor.write(text)
+    monitor.setCursorPos(x,y); monitor.setTextColor(fg); monitor.setBackgroundColor(bg); monitor.write(text)
 end
 
-local function inside(x,y,b)
-    return x>=b.x1 and x<=b.x2 and y>=b.y1 and y<=b.y2
-end
+local function inside(x,y,b) return x>=b.x1 and x<=b.x2 and y>=b.y1 and y<=b.y2 end
 
 local function calculateLayout()
     local width=monitor.getSize()
-    local margin=1
-    local gap=1
+    local margin=1; local gap=1
     local buttonWidth=math.floor((width-(margin*2)-gap)/2)
     buttons.github={x1=margin,y1=2,x2=margin+buttonWidth-1,y2=4}
     buttons.push={x1=buttons.github.x2+gap+1,y1=2,x2=width-margin,y2=4}
@@ -622,19 +562,8 @@ local function drawButton(b,text,color)
     center(b.x1,b.x2,b.y1+1,text,colors.white,color)
 end
 
-local function clientCount()
-    local count=0
-    for _ in pairs(clients) do count=count+1 end
-    return count
-end
-
-local function cachedCount()
-    local count=0
-    for _,file in ipairs(managedFiles) do
-        if cache[file] then count=count+1 end
-    end
-    return count
-end
+local function clientCount() local count=0 for _ in pairs(clients) do count=count+1 end return count end
+local function cachedCount() local count=0 for _,file in ipairs(managedFiles) do if cache[file] then count=count+1 end end return count end
 
 local function currentFailure()
     if #lastFailures==0 then return nil end
@@ -653,44 +582,31 @@ local function drawScreen()
     center(1,width,1,"MASTER CONTROLLER  PC "..computerID,colors.black,colors.cyan)
     drawButton(buttons.github,"REFRESH GITHUB",colors.green)
     drawButton(buttons.push,pushRunning and ("PUSH "..pushDone.."/"..pushTotal) or "PUSH TO ALL",colors.blue)
-
     local y=5
     if y<=height then fill(1,y,width,y,colors.blue); y=y+1 end
 
     local function line(left,right,leftColor,rightColor)
         if y>height then return end
-        left=tostring(left or "")
-        right=tostring(right or "")
+        left=tostring(left or ""); right=tostring(right or "")
         writeAt(2,y,left,leftColor or colors.white,colors.black,math.floor(width*0.62))
-        if right~="" then
-            writeAt(math.max(2,width-#right),y,right,rightColor or colors.white,colors.black)
-        end
+        if right~="" then writeAt(math.max(2,width-#right),y,right,rightColor or colors.white,colors.black) end
         y=y+1
     end
 
-    local authColor=githubAuthStatus=="AUTHENTICATED" and colors.lime
-        or (githubAuthStatus=="TOKEN REJECTED" and colors.red or colors.orange)
-    local rate=(githubRateRemaining and githubRateLimit)
-        and (githubRateRemaining.."/"..githubRateLimit) or "RATE ?"
-
+    local authColor=githubAuthStatus=="AUTHENTICATED" and colors.lime or (githubAuthStatus=="TOKEN REJECTED" and colors.red or colors.orange)
+    local rate=(githubRateRemaining and githubRateLimit) and (githubRateRemaining.."/"..githubRateLimit) or "RATE ?"
     line("GITHUB "..githubAuthStatus,rate,authColor,colors.lightGray)
-    line("CACHE "..cachedCount().."/"..#managedFiles,"CLIENTS "..clientCount(),
-        cachedCount()==#managedFiles and colors.lime or colors.orange,colors.white)
+    line("CACHE "..cachedCount().."/"..#managedFiles,"CLIENTS "..clientCount(),cachedCount()==#managedFiles and colors.lime or colors.orange,colors.white)
 
     if activeRefreshJob then
-        line("REFRESH "..string.upper(activeRefreshJob.kind),
-            "PC "..tostring(activeRefreshJob.current or "PREP"),colors.orange,colors.orange)
-        line("PROGRESS "..tostring(activeRefreshJob.done or 0).."/"..tostring(activeRefreshJob.total or 0),
-            "QUEUE "..#refreshQueue)
+        line("REFRESH "..string.upper(activeRefreshJob.kind),"PC "..tostring(activeRefreshJob.current or "PREP"),colors.orange,colors.orange)
+        line("PROGRESS "..tostring(activeRefreshJob.done or 0).."/"..tostring(activeRefreshJob.total or 0),"QUEUE "..#refreshQueue)
     elseif pushRunning then
         line("PUSHING UPDATES",pushDone.."/"..pushTotal,colors.lightBlue,colors.white)
     elseif #lastFailures>0 then
         local failure=currentFailure()
-        line("FAILED "..failureDisplayIndex.."/"..#lastFailures,
-            failure and short(failure.file,math.floor(width*0.45)) or "?",colors.red,colors.orange)
-        if y<=height and failure then
-            line("REASON",short(failure.error,math.floor(width*0.55)),colors.orange,colors.white)
-        end
+        line("FAILED "..failureDisplayIndex.."/"..#lastFailures,failure and short(failure.file,math.floor(width*0.45)) or "?",colors.red,colors.orange)
+        if y<=height and failure then line("REASON",short(failure.error,math.floor(width*0.55)),colors.orange,colors.white) end
     else
         line("STATUS",lastAction,colors.cyan,colors.white)
     end
@@ -699,22 +615,16 @@ local function drawScreen()
         if #lastFailures>0 then
             local cachedFailures=0
             for _,f in ipairs(lastFailures) do if f.cached then cachedFailures=cachedFailures+1 end end
-            line("GITHUB FAILURES "..#lastFailures,
-                "CACHE FALLBACK "..cachedFailures.."/"..#lastFailures,
-                colors.red,cachedFailures==#lastFailures and colors.yellow or colors.red)
+            line("GITHUB FAILURES "..#lastFailures,"CACHE FALLBACK "..cachedFailures.."/"..#lastFailures,colors.red,cachedFailures==#lastFailures and colors.yellow or colors.red)
+        elseif #lastChangedFiles>0 then
+            line("LAST CHANGED "..#lastChangedFiles,"AUTO PUSH ENABLED",colors.cyan,colors.lime)
         else
-            line(lastRefresh>0 and ("GITHUB "..math.floor((now()-lastRefresh)/1000).."s AGO") or "GITHUB NOT YET REFRESHED",
-                "CACHE HEALTHY",colors.lightGray,colors.lime)
+            line(lastRefresh>0 and ("GITHUB "..math.floor((now()-lastRefresh)/1000).."s AGO") or "GITHUB NOT YET REFRESHED","CACHE HEALTHY",colors.lightGray,colors.lime)
         end
     end
 end
 
-local function displayLoop()
-    while true do
-        drawScreen()
-        sleep(0.25)
-    end
-end
+local function displayLoop() while true do drawScreen(); sleep(0.25) end end
 
 local function monitorLoop()
     while true do
@@ -722,11 +632,11 @@ local function monitorLoop()
         if side==monitorName then
             if inside(x,y,buttons.github) then
                 drawButton(buttons.github,"REFRESHING...",colors.lime)
-                local successes,failures=refreshAll(true)
+                refreshAll(true)
                 print("")
-                print("Monitor updated with detailed failure status.")
+                print("Manual refresh complete. Automatic push only occurs on scheduled refreshes.")
             elseif inside(x,y,buttons.push) and not pushRunning then
-                buildPushQueue()
+                buildPushQueue("MANUAL PUSH")
             end
         end
     end
@@ -740,13 +650,6 @@ term.clear(); term.setCursorPos(1,1)
 print("MASTER CONTROLLER")
 print("TOP monitor: 4 wide x 1 tall optimized")
 print("Initial GitHub cache refresh...")
-local successes,failures=refreshAll(true)
+refreshAll(true)
 
-parallel.waitForAll(
-    networkLoop,
-    sequentialRefreshLoop,
-    refreshLoop,
-    pushLoop,
-    displayLoop,
-    monitorLoop
-)
+parallel.waitForAll(networkLoop,sequentialRefreshLoop,refreshLoop,pushLoop,displayLoop,monitorLoop)
