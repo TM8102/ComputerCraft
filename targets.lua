@@ -53,7 +53,7 @@ return {
     },
     ["mysticalagriculture:dye_essence"] = {
         displayName = "Dye Essence",
-        target = 65500,
+        target = 2097152000,
 
         machine = {
             computerID = 4,
@@ -66,7 +66,7 @@ return {
     },
     ["mysticalagriculture:dragon_egg_essence"] = {
         displayName = "Dragon Egg Essence",
-        target = 65500,
+        target = 2097152000,
 
         machine = {
             computerID = 4,
@@ -79,7 +79,7 @@ return {
     },
     ["mysticalagriculture:soulium_essence"] = {
         displayName = "Soulium Essence",
-        target = 65500,
+        target = 2097152000,
 
         machine = {
             computerID = 4,
@@ -92,7 +92,7 @@ return {
     },
     ["mysticalagriculture:nature_essence"] = {
         displayName = "Nature Essence",
-        target = 65500,
+        target = 2097152000,
 
         machine = {
             computerID = 34,
@@ -105,7 +105,7 @@ return {
     },
     ["mysticalagriculture:nether_essence"] = {
         displayName = "Nether Essence",
-        target = 65500,
+        target = 2097152000,
 
         machine = {
             computerID = 34,
@@ -118,7 +118,7 @@ return {
     },
     ["mysticalagriculture:sculk_essence"] = {
         displayName = "Sculk Essence",
-        target = 65500,
+        target = 2097152000,
 
         machine = {
             computerID = 34,
@@ -131,7 +131,7 @@ return {
     },
     ["mysticalagriculture:dirt_essence"] = {
         displayName = "Dirt Essence",
-        target = 65500,
+        target = 2097152000,
 
         machine = {
             computerID = 35,
@@ -144,7 +144,7 @@ return {
     },
     ["mysticalagriculture:water_essence"] = {
         displayName = "Water Essence",
-        target = 65500,
+        target = 2097152000,
 
         machine = {
             computerID = 35,
@@ -157,7 +157,7 @@ return {
     },
     ["mysticalagriculture:honey_essence"] = {
         displayName = "Honey Essence",
-        target = 65500,
+        target = 2097152000,
 
         machine = {
             computerID = 35,
@@ -170,7 +170,7 @@ return {
     },
     ["mysticalagriculture:stone_essence"] = {
         displayName = "Stone Essence",
-        target = 65500,
+        target = 2097152000,
 
         machine = {
             computerID = 35,
@@ -183,7 +183,7 @@ return {
     },
     ["mysticalagriculture:fire_essence"] = {
         displayName = "Fire Essence",
-        target = 65500,
+        target = 2097152000,
 
         machine = {
             computerID = 11,
@@ -196,7 +196,7 @@ return {
     },
     ["mysticalagradditions:insanium_essence"] = {
         displayName = "Insanium",
-        target = 65500,
+        target = 2097152000,
 
         machine = {
             computerID = 4,
@@ -209,7 +209,7 @@ return {
     },
     ["mysticalagradditions:experience_essence"] = {
         displayName = "Experience Essence",
-        target = 65500,
+        target = 2097152000,
 
         machine = {
             computerID = 11,
@@ -222,7 +222,7 @@ return {
     },
     ["minecraft:nether_star"] = {
         displayName = "Nether Star",
-        target = 65500,
+        target = 2097152000,
 
         machine = {
             computerID = 34,
@@ -326,7 +326,7 @@ return {
     },
     ["mysticalagriculture:fertilized_essence"] = {
         displayName = "Fertilized Essence",
-        target = 65500,
+        target = 2097152000,
 
         machine = nil
     }
