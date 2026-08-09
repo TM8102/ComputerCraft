@@ -1,8 +1,9 @@
 -- =========================================================
 -- COMPUTERCRAFT WEB STATUS PUBLISHER
 -- Runs beside master_controller.lua on the Master PC.
--- Watches the existing Rednet traffic, builds a full system snapshot,
--- and updates docs/status.json for the GitHub Pages dashboard.
+-- Watches Rednet traffic, builds a full system snapshot,
+-- calculates material production/consumption rates, and updates
+-- docs/status.json for the GitHub Pages dashboard.
 --
 -- Requires .github_token with Contents: Read and write.
 -- =========================================================
@@ -20,6 +21,8 @@ local publishInterval = 60
 local sourceOfflineSeconds = 15
 local sourceRemoveSeconds = 120
 local computerOfflineSeconds = 35
+local rateSmoothing = 0.35
+local rateDeadband = 0.01
 
 local storageSources = {}
 local machines = {}
@@ -31,6 +34,7 @@ local statusSha = nil
 local lastPublish = 0
 local lastPublishOK = false
 local lastPublishError = nil
+local rateState = {}
 
 local function now() return os.epoch("utc") end
 
@@ -191,8 +195,56 @@ local function processSpawner(senderID,message)
     }
 end
 
-local function buildResources()
-    local time=now()
+local function applyRate(resource,sampleTime)
+    local itemID=resource.itemID
+    local amount=tonumber(resource.amount) or 0
+    local state=rateState[itemID]
+
+    resource.netPerSecond=0
+    resource.producedPerSecond=0
+    resource.consumedPerSecond=0
+    resource.rateSampleSeconds=0
+    resource.etaSeconds=nil
+    resource.etaType=nil
+
+    if state and state.amount~=nil and state.time and sampleTime>state.time then
+        local seconds=(sampleTime-state.time)/1000
+        local rawRate=(amount-state.amount)/seconds
+        local smoothed
+
+        if state.rate==nil then
+            smoothed=rawRate
+        else
+            smoothed=(state.rate*(1-rateSmoothing))+(rawRate*rateSmoothing)
+        end
+
+        if math.abs(smoothed)<rateDeadband then smoothed=0 end
+        state.amount=amount
+        state.time=sampleTime
+        state.rate=smoothed
+
+        resource.netPerSecond=smoothed
+        resource.rateSampleSeconds=seconds
+        if smoothed>0 then
+            resource.producedPerSecond=smoothed
+            if resource.target and resource.target>amount then
+                resource.etaSeconds=(resource.target-amount)/smoothed
+                resource.etaType="FULL"
+            end
+        elseif smoothed<0 then
+            resource.consumedPerSecond=math.abs(smoothed)
+            if amount>0 then
+                resource.etaSeconds=amount/math.abs(smoothed)
+                resource.etaType="EMPTY"
+            end
+        end
+    else
+        rateState[itemID]={amount=amount,time=sampleTime,rate=nil}
+    end
+end
+
+local function buildResources(sampleTime)
+    local time=sampleTime or now()
     local combined={}
     for _,source in pairs(storageSources) do
         for itemID,data in pairs(source) do
@@ -222,13 +274,21 @@ local function buildResources()
     end
 
     local list={}
+    local seen={}
     for _,r in pairs(combined) do
         if not r.online then r.error=r.error or "DISCONNECTED"
         elseif not r.found then r.error=r.error or "STORAGE NOT FOUND"
         elseif not r.target or r.target<=0 then r.error=r.error or "NO TARGET" end
         if r.target and r.target>0 then r.percent=math.max(0,math.min(100,r.amount/r.target*100)) end
+        applyRate(r,time)
+        seen[r.itemID]=true
         list[#list+1]=r
     end
+
+    for itemID in pairs(rateState) do
+        if not seen[itemID] then rateState[itemID]=nil end
+    end
+
     table.sort(list,function(a,b) return string.lower(a.name or a.itemID)<string.lower(b.name or b.itemID) end)
     return list
 end
@@ -266,10 +326,11 @@ local function buildComputers()
 end
 
 local function buildSnapshot()
+    local sampleTime=now()
     return {
-        updatedAt=now(),
+        updatedAt=sampleTime,
         masterID=os.getComputerID(),
-        resources=buildResources(),
+        resources=buildResources(sampleTime),
         spawners=buildSpawners(),
         computers=buildComputers(),
         fans=fansState
@@ -362,6 +423,7 @@ end
 
 print("WEB STATUS PUBLISHER")
 print("Publishes docs/status.json every "..publishInterval.." seconds")
+print("Rate calculation: amount delta / actual seconds, EMA smoothed")
 print("Master ID: "..os.getComputerID())
 
 parallel.waitForAll(networkLoop,publishLoop)
