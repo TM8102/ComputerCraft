@@ -290,9 +290,9 @@ return {
         target = 2097152000,
 
         machine = {
-            computerID = 500,
+            computerID = 41,
             machineKey = "allthemodium_ingot",
-            side = "back",
+            side = "right",
 
             startBelow = 50,
             stopAt = 100
