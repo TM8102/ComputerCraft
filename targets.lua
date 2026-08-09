@@ -287,17 +287,17 @@ return {
     },
     ["allthemodium:allthemodium_ingot"] = {
         displayName = "AllTheModium Ingot",
-        target = 2097152000
+        target = 2097152000,
         machine = nil
     },
     ["allthemodium:vibranium_ingot"] = {
         displayName = "Vibranium Ingot",
-        target = 2097152000
+        target = 2097152000,
         machine = nil
     },
     ["allthemodium:unobtainium_ingot"] = {
         displayName = "Unobtainium Ingot",
-        target = 2097152000
+        target = 2097152000,
         machine = nil
     },
     ["justdirethings:polymorphic_fluid_source"] = {
