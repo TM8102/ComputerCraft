@@ -5,6 +5,7 @@
 -- updated one-at-a-time instead of all at once.
 -- The startup listener also accepts PUSH ALL from the Master.
 -- Clients heartbeat/register so the Master always knows them.
+-- Master also runs web_status_publisher.lua for GitHub Pages.
 -- =========================================================
 
 local masterProtocol = "cc_master_update"
@@ -12,6 +13,7 @@ local rawBase = "https://raw.githubusercontent.com/TM8102/ComputerCraft/main/"
 local roleFile = ".computer_role"
 local masterTimeout = 3
 local heartbeatSeconds = 10
+local webPublisherFile = "web_status_publisher.lua"
 
 local roles = {
     ["1"] = { name="MAIN STORAGE SCREEN", file="main_storage.lua" },
@@ -151,7 +153,6 @@ local function registerWithMaster(roleNumber,role)
     },masterProtocol)
 end
 
--- Intercept ONLY manual config-refresh broadcasts from the two panels.
 local originalBroadcast=rednet.broadcast
 local function installRefreshRouter()
     rednet.broadcast=function(message,protocol)
@@ -193,11 +194,9 @@ local function masterControlListener(roleNumber,role)
                 os.reboot()
 
             elseif message.type=="discover_clients" then
-                -- Respond immediately so PUSH TO ALL can rebuild a complete list.
                 registerWithMaster(roleNumber,role)
             end
         else
-            -- Keep the Master's client registry alive even if the Master reboots.
             registerWithMaster(roleNumber,role)
         end
     end
@@ -219,6 +218,17 @@ local success,sourceOrError
 if role.master then
     print("Master bootstrap: GitHub RAW")
     success,sourceOrError=downloadFromRawGitHub(role.file)
+    local webOK,webSource=downloadFromRawGitHub(webPublisherFile)
+    if webOK then
+        print("Web publisher updated from "..tostring(webSource))
+    else
+        term.setTextColor(colors.orange)
+        print("Web publisher update failed: "..tostring(webSource))
+        term.setTextColor(colors.white)
+        if not fs.exists(webPublisherFile) then
+            print("Web dashboard publisher will be unavailable this boot.")
+        end
+    end
 else
     print("Looking for Master Controller...")
     success,sourceOrError=downloadFromMaster(role.file,roleNumber,role)
@@ -253,7 +263,14 @@ print("Starting "..role.file.."...")
 sleep(0.5)
 
 if role.master then
-    shell.run(role.file)
+    if fs.exists(webPublisherFile) then
+        parallel.waitForAny(
+            function() shell.run(role.file) end,
+            function() shell.run(webPublisherFile) end
+        )
+    else
+        shell.run(role.file)
+    end
 else
     openAnyModem()
     registerWithMaster(roleNumber,role)
