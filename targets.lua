@@ -303,20 +303,17 @@ return {
     ["justdirethings:polymorphic_fluid_source"] = {
         displayName = "Polymorphic Fluid",
         target = 512000,
-
         machine = nil
     },
     ["industrialforegoing:meat"] = {
         displayName = "Liquid Meat",
         target = 32000,
-
         machine = nil
         
     },
     ["mysticalagriculture:fertilized_essence"] = {
         displayName = "Fertilized Essence",
         target = 2097152000,
-
         machine = nil
     }
 }
