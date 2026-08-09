@@ -207,6 +207,19 @@ return {
             stopAt = 100
         }
     },
+    ["mysticalagradditions:experience_essence"] = {
+        displayName = "Experience Essence",
+        target = 65500,
+
+        machine = {
+            computerID = 11,
+            machineKey = "experience_essence",
+            side = "left",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
     ["minecraft:nether_star"] = {
         displayName = "Nether Star",
         target = 65500,
