@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#071019">
+  <title>ComputerCraft System Status</title>
+  <style>
+    :root{--bg:#071019;--panel:#0d1822;--panel2:#111f2b;--line:#23394a;--text:#eaf3f8;--muted:#8ea4b3;--cyan:#39d7ff;--blue:#2389ff;--green:#39df82;--orange:#ffab45;--red:#ff5454;--shadow:0 14px 35px rgba(0,0,0,.28)}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 50% -20%,#143044 0,#071019 38%,#050b10 100%);color:var(--text);font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;min-height:100vh}
+    .wrap{max-width:1500px;margin:auto;padding:22px}.top{display:flex;gap:14px;align-items:center;justify-content:space-between;margin-bottom:14px}.title{font-size:clamp(22px,3vw,38px);font-weight:900;letter-spacing:.04em}.title span{color:var(--cyan)}
+    .live{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--line);background:#0a141d;border-radius:999px;color:var(--muted)}.dot{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 10px var(--green)}.dot.stale{background:var(--orange);box-shadow:0 0 10px var(--orange)}.dot.offline{background:var(--red);box-shadow:0 0 10px var(--red)}
+    .summary{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr));gap:10px;margin-bottom:14px}.stat{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow)}.stat b{font-size:24px;display:block}.stat small{color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+    .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:14px 0}.btn,.search{border:1px solid var(--line);background:#0b1720;color:var(--text);border-radius:9px;padding:9px 12px}.btn{cursor:pointer;font-weight:800}.btn.active{background:var(--blue);border-color:var(--blue)}.search{flex:1;min-width:200px;outline:none}.search:focus{border-color:var(--cyan)}
+    .section{margin-top:22px}.section-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px}.section h2{font-size:16px;margin:0;text-transform:uppercase;letter-spacing:.1em;color:#cfe9f7}.sub{color:var(--muted)}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}.card{background:linear-gradient(180deg,#111f2b,#0c1720);border:1px solid var(--line);border-left:4px solid var(--blue);border-radius:11px;padding:12px;box-shadow:var(--shadow)}.card.low{border-left-color:var(--orange)}.card.critical,.card.error{border-left-color:var(--red)}.card.full{border-left-color:var(--green)}
+    .name{font-weight:850;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:8px}.amount{display:flex;justify-content:space-between;color:var(--muted);font-variant-numeric:tabular-nums}.bar{height:8px;background:#050a0e;border-radius:99px;overflow:hidden;margin:8px 0}.fill{height:100%;background:var(--blue);border-radius:99px}.card.low .fill{background:var(--orange)}.card.critical .fill,.card.error .fill{background:var(--red)}.card.full .fill{background:var(--green)}
+    .pillrow{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}.pill{font-size:11px;padding:3px 7px;border-radius:99px;background:#172734;color:#b8ccd8}.pill.run{background:#123b27;color:#65ef9d}.pill.err{background:#472020;color:#ff8a8a}
+    table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:11px;overflow:hidden}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid #192c39}th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em}.ok{color:var(--green)}.warn{color:var(--orange)}.bad{color:var(--red)}
+    .empty{padding:18px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);text-align:center}.footer{margin:26px 0 8px;color:var(--muted);text-align:center;font-size:12px}
+    @media(max-width:850px){.summary{grid-template-columns:repeat(2,1fr)}.summary .stat:first-child{grid-column:span 2}.wrap{padding:14px}.top{align-items:flex-start;flex-direction:column}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><div class="title"><span>CC</span> SYSTEM STATUS</div><div class="live"><span id="dot" class="dot offline"></span><span id="fresh">Waiting for data…</span></div></div>
+  <div class="summary">
+    <div class="stat"><b id="resources">—</b><small>Resources</small></div>
+    <div class="stat"><b id="low">—</b><small>Low</small></div>
+    <div class="stat"><b id="errors">—</b><small>Errors</small></div>
+    <div class="stat"><b id="running">—</b><small>Machines Running</small></div>
+    <div class="stat"><b id="clients">—</b><small>Linked Computers</small></div>
+  </div>
+  <div class="toolbar">
+    <button class="btn active" data-filter="all">All</button><button class="btn" data-filter="low">Low</button><button class="btn" data-filter="running">Running</button><button class="btn" data-filter="errors">Errors</button>
+    <input id="search" class="search" placeholder="Search materials…">
+  </div>
+  <section class="section"><div class="section-head"><h2>Materials</h2><span id="shown" class="sub"></span></div><div id="materials" class="grid"></div></section>
+  <section class="section"><div class="section-head"><h2>Active Spawners</h2></div><div id="spawners" class="sub"></div></section>
+  <section class="section"><div class="section-head"><h2>Linked Computers</h2><span class="sub">Master + clients</span></div><div id="computers"></div></section>
+  <div class="footer">Auto-refreshes every 30 seconds. Data is published by the in-game Master Controller.</div>
+</div>
+<script>
+let data=null, filter='all';
+const fmt=n=>new Intl.NumberFormat().format(Math.floor(Number(n)||0));
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function age(ms){const s=Math.max(0,Math.floor((Date.now()-ms)/1000)); if(s<60)return s+'s ago'; if(s<3600)return Math.floor(s/60)+'m ago'; return Math.floor(s/3600)+'h ago'}
+function statusClass(r){if(r.error)return'error';const p=Number(r.percent);if(p<25)return'critical';if(p<75)return'low';if(p>=100)return'full';return''}
+function render(){if(!data)return;const updated=Number(data.updatedAt||0), seconds=(Date.now()-updated)/1000;const dot=document.getElementById('dot');dot.className='dot '+(seconds>300?'offline':seconds>120?'stale':'');document.getElementById('fresh').textContent=updated?('Updated '+age(updated)):'No update received';
+ const rs=data.resources||[];document.getElementById('resources').textContent=rs.length;document.getElementById('low').textContent=rs.filter(r=>r.error||Number(r.percent)<75).length;document.getElementById('errors').textContent=rs.filter(r=>r.error).length;document.getElementById('running').textContent=rs.filter(r=>r.machineRunning).length;document.getElementById('clients').textContent=(data.computers||[]).length;
+ const q=document.getElementById('search').value.trim().toLowerCase();let list=rs.filter(r=>!q||String(r.name||r.itemID).toLowerCase().includes(q));if(filter==='low')list=list.filter(r=>r.error||Number(r.percent)<75);if(filter==='running')list=list.filter(r=>r.machineRunning);if(filter==='errors')list=list.filter(r=>r.error);document.getElementById('shown').textContent=list.length+' shown';
+ document.getElementById('materials').innerHTML=list.length?list.map(r=>{const p=Math.max(0,Math.min(100,Number(r.percent)||0)),cls=statusClass(r);return `<article class="card ${cls}"><div class="name">${esc(r.name||r.itemID)}</div><div class="amount"><span>${fmt(r.amount)} / ${fmt(r.target)}</span><b>${r.error?'ERROR':p.toFixed(0)+'%'}</b></div><div class="bar"><div class="fill" style="width:${p}%"></div></div><div class="pillrow">${r.machineRunning?'<span class="pill run">MACHINE RUNNING</span>':''}${r.error?`<span class="pill err">${esc(r.error)}</span>`:''}</div></article>`}).join(''):'<div class="empty">No materials match this view.</div>';
+ const sp=(data.spawners||[]).filter(s=>s.state);document.getElementById('spawners').innerHTML=sp.length?sp.map(s=>`<span class="pill run">${esc(s.name)}</span>`).join(' '):'<span class="sub">None active</span>';
+ const pcs=data.computers||[];document.getElementById('computers').innerHTML=pcs.length?`<table><thead><tr><th>PC</th><th>Role</th><th>Status</th><th>Last Seen</th></tr></thead><tbody>${pcs.map(p=>{const a=(Date.now()-Number(p.lastSeen||0))/1000,c=a<30?'ok':a<90?'warn':'bad',st=p.isMaster?'MASTER':a<30?'ONLINE':a<90?'STALE':'OFFLINE';return `<tr><td>${esc(p.id)}</td><td>${esc(p.roleName||'UNKNOWN')}</td><td class="${c}">${st}</td><td>${p.lastSeen?age(Number(p.lastSeen)):'Never'}</td></tr>`}).join('')}</tbody></table>`:'<div class="empty">No linked-computer data yet.</div>';
+}
+async function load(){try{const r=await fetch('status.json?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);data=await r.json();render()}catch(e){document.getElementById('fresh').textContent='Status file unavailable';document.getElementById('dot').className='dot offline'}}
+document.querySelectorAll('.btn').forEach(b=>b.onclick=()=>{document.querySelectorAll('.btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');filter=b.dataset.filter;render()});document.getElementById('search').addEventListener('input',render);load();setInterval(load,30000);setInterval(()=>data&&render(),5000);
+</script>
+</body></html>
