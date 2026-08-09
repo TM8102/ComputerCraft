@@ -14,6 +14,7 @@ local branch = "main"
 local pollSeconds = 5
 local fanShutdownSeconds = 15
 local maintenanceFreshSeconds = 20
+local commandFreshSeconds = 120
 
 local githubToken = nil
 local lastNonce = 0
@@ -56,9 +57,7 @@ end
 local function maintenanceActive()
     local t=now()
     for _,info in pairs(maintenanceByNode) do
-        if info.state and t-(info.updated or 0)<=maintenanceFreshSeconds*1000 then
-            return true
-        end
+        if info.state and t-(info.updated or 0)<=maintenanceFreshSeconds*1000 then return true end
     end
     return false
 end
@@ -94,12 +93,16 @@ local function processCommand(data)
     local nonce=tonumber(data.nonce) or 0
     if nonce<=lastNonce then return end
     lastNonce=nonce
-    local command=string.lower(tostring(data.command or "none"))
-    if command=="mob_on" then
-        startFarm()
-    elseif command=="mob_off" then
-        stopFarm()
+
+    local requestedAt=tonumber(data.requestedAt) or 0
+    if requestedAt<=0 or now()-requestedAt>commandFreshSeconds*1000 then
+        print("WEB CONTROL: ignored stale command nonce "..tostring(nonce))
+        return
     end
+
+    local command=string.lower(tostring(data.command or "none"))
+    if command=="mob_on" then startFarm()
+    elseif command=="mob_off" then stopFarm() end
 end
 
 local function pollOnce()
@@ -142,7 +145,7 @@ end
 
 local function timerLoop()
     while true do
-        local event,id=os.pullEvent("timer")
+        local _,id=os.pullEvent("timer")
         if fanShutdownTimer and id==fanShutdownTimer then
             fanShutdownRemaining=fanShutdownRemaining-1
             if fanShutdownRemaining<=0 then
@@ -159,9 +162,7 @@ end
 
 if not peripheral.find("modem") then error("No modem found for web control bridge") end
 for _,side in ipairs({"back","front","left","right","top","bottom"}) do
-    if peripheral.isPresent(side) and peripheral.getType(side)=="modem" and not rednet.isOpen(side) then
-        rednet.open(side)
-    end
+    if peripheral.isPresent(side) and peripheral.getType(side)=="modem" and not rednet.isOpen(side) then rednet.open(side) end
 end
 
 loadToken()
