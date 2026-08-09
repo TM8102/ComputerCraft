@@ -424,6 +424,11 @@ return {
         target = 67108864,
         machine = nil
     },
+    ["justdirethings:polymorphic_catalyst"] = {
+        displayName = "Polymorphic Catalyst",
+        target = 67108864,
+        machine = nil
+    },
     ["mysticalagriculture:awakended_draconium_essence"] = {
         displayName = "Awakended Dragonium Essence",
         target = 67108864,
