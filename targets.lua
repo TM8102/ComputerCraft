@@ -220,6 +220,19 @@ return {
             stopAt = 100
         }
     },
+    ["mysticalagriculture:deepslate_essence"] = {
+        displayName = "Deepslate Essence",
+        target = 2097152000,
+
+        machine = {
+            computerID = 11,
+            machineKey = "deepslate_essence",
+            side = "front",
+
+            startBelow = 50,
+            stopAt = 100
+        }
+    },
     ["minecraft:nether_star"] = {
         displayName = "Nether Star",
         target = 2097152000,
