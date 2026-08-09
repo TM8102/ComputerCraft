@@ -427,6 +427,13 @@ return {
     ["mysticalagriculture:awakended_draconium_essence"] = {
         displayName = "Awakended Dragonium Essence",
         target = 67108864,
-        machine = nil
+        machine = {
+            computerID = 11,
+            machineKey = "awakened_draconium_essence",
+            side = "right",
+
+            startBelow = 50,
+            stopAt = 100
+        }
     }
 }
