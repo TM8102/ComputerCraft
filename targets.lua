@@ -287,42 +287,15 @@ return {
     },
     ["allthemodium:allthemodium_ingot"] = {
         displayName = "AllTheModium Ingot",
-        target = 2097152000,
-
-        machine = {
-            computerID = 41,
-            machineKey = "allthemodium_ingot",
-            side = "right",
-
-            startBelow = 50,
-            stopAt = 100
-        }
+        target = 2097152000
     },
     ["allthemodium:vibranium_ingot"] = {
         displayName = "Vibranium Ingot",
-        target = 2097152000,
-
-        machine = {
-            computerID = 501,
-            machineKey = "vibranium_ingot",
-            side = "back",
-
-            startBelow = 50,
-            stopAt = 100
-        }
+        target = 2097152000
     },
     ["allthemodium:unobtainium_ingot"] = {
         displayName = "Unobtainium Ingot",
-        target = 2097152000,
-
-        machine = {
-            computerID = 501,
-            machineKey = "unobtainium_ingot",
-            side = "right",
-
-            startBelow = 50,
-            stopAt = 100
-        }
+        target = 2097152000
     },
     ["justdirethings:polymorphic_fluid_source"] = {
         displayName = "Polymorphic Fluid",
