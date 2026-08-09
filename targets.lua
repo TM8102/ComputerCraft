@@ -429,7 +429,7 @@ return {
         target = 67108864,
         machine = nil
     },
-    ["mysticalagriculture:awakended_draconium_essence"] = {
+    ["mysticalagriculture:awakened_draconium_essence"] = {
         displayName = "Awakended Dragonium Essence",
         target = 67108864,
         machine = {
