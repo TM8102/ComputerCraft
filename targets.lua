@@ -311,9 +311,122 @@ return {
         machine = nil
         
     },
+    ["minecraft:redstone"] = {
+        displayName = "Redstone",
+        target = 42467328,
+        machine = nil
+        
+    },
+    ["minecraft:emerald"] = {
+        displayName = "Emeralds",
+        target = 4718592,
+        machine = nil
+        
+    },
+    ["minecraft:copper_ingot"] = {
+        displayName = "Copper Ingots",
+        target = 4718592,
+        machine = nil
+        
+    },
+    ["alltheores:zinc_ingot"] = {
+        displayName = "Zinc Ingots",
+        target = 4718592,
+        machine = nil
+        
+    },
+    ["alltheores:silver_ingot"] = {
+        displayName = "Silver Ingots",
+        target = 4718592,
+        machine = nil
+        
+    },
+    ["alltheores:lead_ingot"] = {
+        displayName = "Lead Ingots",
+        target = 4718592,
+        machine = nil
+        
+    },
+    ["alltheores:tin_ingot"] = {
+        displayName = "Tin Ingots",
+        target = 4718592,
+        machine = nil
+        
+    },
+    ["alltheores:platinum_ingot"] = {
+        displayName = "Platinum Ingots",
+        target = 4718592,
+        machine = nil
+        
+    },
+    ["powah:uraninite_raw"] = {
+        displayName = "Raw Uraninite",
+        target = 4718592,
+        machine = nil
+        
+    },
+    ["minecraft:diamond"] = {
+        displayName = "Diamonds",
+        target = 4718592,
+        machine = nil
+        
+    },
+    ["minecraft:coal"] = {
+        displayName = "Coal",
+        target = 1327104,
+        machine = nil
+        
+    },
+    ["minecraft:lapis_lazuli"] = {
+        displayName = "Lapis",
+        target = 1327104,
+        machine = nil
+        
+    },
+    ["minecraft:quartz"] = {
+        displayName = "Quartz",
+        target = 42467328,
+        machine = nil
+        
+    },
+    ["ae2:certus_quartz_crystal"] = {
+        displayName = "Certus Quartz Crystal",
+        target = 150994944,
+        machine = nil
+        
+    },
+    ["alltheores:osmium_ingot"] = {
+        displayName = "Osmium Ingots",
+        target = 4718592,
+        machine = nil
+        
+    },
+    ["alltheores:aluminum_ingot"] = {
+        displayName = "Aluminum Ingots",
+        target = 4718592,
+        machine = nil
+        
+    },
+    ["alltheores:uranium_ingot"] = {
+        displayName = "Uranium Ingots",
+        target = 4718592,
+        machine = nil
+        
+    },
+    ["alltheores:nickel_ingot"] = {
+        displayName = "Nickel Ingots",
+        target = 4718592,
+        machine = nil
+        
+    },
     ["mysticalagriculture:fertilized_essence"] = {
         displayName = "Fertilized Essence",
         target = 2097152000,
+        machine = nil
+    },
+    ["mysticalagriculture:awakended_draconium_essence"] = {
+        displayName = "Awakended Dragonium Essence",
+        target = 67108864,
         machine = nil
     }
 }
