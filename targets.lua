@@ -207,7 +207,7 @@ return {
             stopAt = 100
         }
     },
-    ["mysticalagradditions:experience_essence"] = {
+    ["mysticalagriculture:experience_essence"] = {
         displayName = "Experience Essence",
         target = 2097152000,
 
