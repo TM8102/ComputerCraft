@@ -43,6 +43,13 @@ return {
             right = "Skeletons"
         },
 
+        [6] = {
+            front = "Witch",
+            back = "N/A",
+            left = "N/A",
+            right = "N/A"
+        },
+
         [24] = {
             front = "Zombie",
             back = "Charged Creepers",
