@@ -1,8 +1,8 @@
 {
   "command": "spawner_set",
   "computerID": 20,
-  "spawnerKey": "side_front",
-  "state": false,
-  "nonce": 1786438412866,
-  "requestedAt": 1786438412866
+  "spawnerKey": "side_left",
+  "state": true,
+  "nonce": 1786438415697,
+  "requestedAt": 1786438415697
 }
