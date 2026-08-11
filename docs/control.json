@@ -1,8 +1,5 @@
 {
-  "command": "spawner_set",
-  "computerID": 20,
-  "spawnerKey": "side_back",
-  "state": true,
-  "nonce": 1786438616239,
-  "requestedAt": 1786438616239
+  "command": "fans_on",
+  "nonce": 1786438621441,
+  "requestedAt": 1786438621441
 }
