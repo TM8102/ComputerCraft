@@ -5,6 +5,7 @@ return {
   computers = {
     [5] = { front="N/A", back="N/A", left="N/A", right="N/A" },
     [6] = { front="N/A", back="N/A", left="N/A", right="Witch" },
+    [20] = { front="Squid", back="Spider", left="Ghast", right="Skeleton" },
     [24] = { front="N/A", back="Enderman", left="Zombie", right="Charged Creeper" },
     [26] = { front="Wilden Defender", back="Wilden Hunter", left="Wilden Stalker", right="Wither Skeleton" },
   }
