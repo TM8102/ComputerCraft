@@ -37,38 +37,15 @@ if not peripheral.isPresent(modemSide) then error("No modem found on "..modemSid
 rednet.open(modemSide)
 
 local theme={
-    background=colors.black,
-    header=colors.cyan,
-    headerText=colors.black,
-    headerSub=colors.gray,
-    accent=colors.blue,
-    card=colors.gray,
-    cardText=colors.white,
-    empty=colors.black,
-    emptyBorder=colors.gray,
-    emptyText=colors.gray,
-    full=colors.lime,
-    good=colors.lightBlue,
-    warn=colors.orange,
-    low=colors.red,
-    criticalA=colors.red,
-    criticalB=colors.black,
-    errorA=colors.red,
-    errorB=colors.orange,
-    chase=colors.lime,
-    progressBg=colors.black,
-    reboot=colors.blue,
-    rebootPressed=colors.lightBlue,
-    refresh=colors.green,
-    refreshPressed=colors.lime,
-    footer=colors.gray,
-    footerText=colors.white,
-    popup=colors.gray,
-    popupBorder=colors.lightGray,
-    popupTitle=colors.cyan,
-    success=colors.lime,
-    failure=colors.red,
-    pending=colors.orange
+    background=colors.black,header=colors.cyan,headerText=colors.black,headerSub=colors.gray,
+    accent=colors.blue,card=colors.gray,cardText=colors.white,empty=colors.black,
+    emptyBorder=colors.gray,emptyText=colors.gray,full=colors.lime,good=colors.lightBlue,
+    warn=colors.orange,low=colors.red,criticalA=colors.red,criticalB=colors.black,
+    errorA=colors.red,errorB=colors.orange,chase=colors.lime,progressBg=colors.black,
+    reboot=colors.blue,rebootPressed=colors.lightBlue,refresh=colors.green,
+    refreshPressed=colors.lime,footer=colors.gray,footerText=colors.white,popup=colors.gray,
+    popupBorder=colors.lightGray,popupTitle=colors.cyan,success=colors.lime,
+    failure=colors.red,pending=colors.orange
 }
 
 local storageSources={}
@@ -97,7 +74,12 @@ local chaseDrawn={}
 
 local function now() return os.epoch("utc") end
 
+local function validRect(x1,y1,x2,y2)
+    return type(x1)=="number" and type(y1)=="number" and type(x2)=="number" and type(y2)=="number"
+end
+
 local function fill(x1,y1,x2,y2,color)
+    if not validRect(x1,y1,x2,y2) then return end
     if x2<x1 or y2<y1 then return end
     monitor.setBackgroundColor(color)
     local line=string.rep(" ",x2-x1+1)
@@ -108,6 +90,7 @@ local function fill(x1,y1,x2,y2,color)
 end
 
 local function writeAt(x,y,text,fg,bg)
+    if type(x)~="number" or type(y)~="number" then return end
     monitor.setCursorPos(x,y)
     monitor.setTextColor(fg)
     monitor.setBackgroundColor(bg)
@@ -123,12 +106,14 @@ local function shorten(text,width)
 end
 
 local function center(x1,x2,y,text,fg,bg)
+    if type(x1)~="number" or type(x2)~="number" or type(y)~="number" then return end
     local width=x2-x1+1
     text=shorten(text,width)
     writeAt(x1+math.floor((width-#text)/2),y,text,fg,bg)
 end
 
 local function border(x1,y1,x2,y2,color)
+    if not validRect(x1,y1,x2,y2) then return end
     fill(x1,y1,x2,y1,color)
     fill(x1,y2,x2,y2,color)
     fill(x1,y1,x1,y2,color)
@@ -136,13 +121,16 @@ local function border(x1,y1,x2,y2,color)
 end
 
 local function pixel(x,y,color)
+    if type(x)~="number" or type(y)~="number" then return end
     monitor.setCursorPos(x,y)
     monitor.setBackgroundColor(color)
     monitor.write(" ")
 end
 
 local function inside(x,y,b)
-    return x>=b.x1 and x<=b.x2 and y>=b.y1 and y<=b.y2
+    return type(b)=="table" and type(b.x1)=="number" and type(b.x2)=="number"
+        and type(b.y1)=="number" and type(b.y2)=="number"
+        and x>=b.x1 and x<=b.x2 and y>=b.y1 and y<=b.y2
 end
 
 local function borderPoints(x1,y1,x2,y2)
@@ -185,11 +173,8 @@ local function percentage(card)
 end
 
 local function hasError(card)
-    return not card.online
-        or not card.found
-        or (card.error and card.error~="")
-        or not card.targetAmount
-        or tonumber(card.targetAmount)<=0
+    return not card.online or not card.found or (card.error and card.error~="")
+        or not card.targetAmount or tonumber(card.targetAmount)<=0
 end
 
 local function errorText(card)
@@ -219,17 +204,9 @@ local function progressColor(card)
     return theme.good
 end
 
-local function pageCount()
-    return math.max(1,math.ceil(#cardOrder/cardsPerPage))
-end
-
-local function firstIndex()
-    return (currentPage-1)*cardsPerPage+1
-end
-
-local function lastIndex()
-    return math.min(#cardOrder,currentPage*cardsPerPage)
-end
+local function pageCount() return math.max(1,math.ceil(#cardOrder/cardsPerPage)) end
+local function firstIndex() return (currentPage-1)*cardsPerPage+1 end
+local function lastIndex() return math.min(#cardOrder,currentPage*cardsPerPage) end
 
 local function calculateLayout()
     local width,height=monitor.getSize()
@@ -258,15 +235,8 @@ local function calculateLayout()
         layoutSlots[i]={x1=x1,y1=y1,x2=x2,y2=y2,points=borderPoints(x1,y1,x2,y2)}
     end
 
-    rebootButton.x2=width-2
-    rebootButton.x1=rebootButton.x2-13
-    rebootButton.y1=2
-    rebootButton.y2=4
-
-    refreshButton.x2=rebootButton.x1-2
-    refreshButton.x1=refreshButton.x2-23
-    refreshButton.y1=2
-    refreshButton.y2=4
+    rebootButton.x2=width-2; rebootButton.x1=rebootButton.x2-13; rebootButton.y1=2; rebootButton.y2=4
+    refreshButton.x2=rebootButton.x1-2; refreshButton.x1=refreshButton.x2-23; refreshButton.y1=2; refreshButton.y2=4
 end
 
 local function rebuildCards()
@@ -287,9 +257,7 @@ local function rebuildCards()
                     combined[itemID]=card
                 end
                 card.amount=card.amount+(tonumber(data.amount) or 0)
-                if tonumber(data.targetAmount) and tonumber(data.targetAmount)>0 then
-                    card.targetAmount=tonumber(data.targetAmount)
-                end
+                if tonumber(data.targetAmount) and tonumber(data.targetAmount)>0 then card.targetAmount=tonumber(data.targetAmount) end
                 if data.displayName and data.displayName~="" then card.name=data.displayName end
                 if age<=sourceOfflineSeconds*1000 and data.online then card.online=true end
                 if not data.found then card.found=false end
@@ -300,11 +268,8 @@ local function rebuildCards()
 
     for itemID,m in pairs(machineStates) do
         local age=time-(m.lastUpdate or 0)
-        if age>sourceRemoveSeconds*1000 then
-            machineStates[itemID]=nil
-        elseif combined[itemID] then
-            combined[itemID].machineRunning=m.running==true
-        end
+        if age>sourceRemoveSeconds*1000 then machineStates[itemID]=nil
+        elseif combined[itemID] then combined[itemID].machineRunning=m.running==true end
     end
 
     cards=combined
@@ -318,29 +283,18 @@ local function rebuildCards()
     end)
 
     local pages=pageCount()
-    if currentPage>pages then
-        currentPage=pages
-        pageChangedAt=time
-        structureDirty=true
-    end
+    if currentPage>pages then currentPage=pages; pageChangedAt=time; structureDirty=true end
 
     for itemID,card in pairs(cards) do
         local old=oldCards[itemID]
-        if not old
-            or old.amount~=card.amount
-            or old.targetAmount~=card.targetAmount
-            or old.online~=card.online
-            or old.found~=card.found
-            or old.error~=card.error
-            or old.machineRunning~=card.machineRunning
-            or old.name~=card.name then
+        if not old or old.amount~=card.amount or old.targetAmount~=card.targetAmount
+            or old.online~=card.online or old.found~=card.found or old.error~=card.error
+            or old.machineRunning~=card.machineRunning or old.name~=card.name then
             dirtyCards[itemID]=true
         end
     end
 
-    for itemID in pairs(oldCards) do
-        if not cards[itemID] then structureDirty=true end
-    end
+    for itemID in pairs(oldCards) do if not cards[itemID] then structureDirty=true end end
 end
 
 local function drawButton(button,text,color)
@@ -352,40 +306,32 @@ local function drawHeader()
     local width=monitor.getSize()
     fill(1,1,width,5,theme.header)
     writeAt(3,2,"STORAGE MANAGEMENT",theme.headerText,theme.header)
-
     local subtitle="LIVE RESOURCE STATUS"
     if pageCount()>1 then
         local remaining=math.max(0,pageSeconds-math.floor((now()-pageChangedAt)/1000))
         subtitle=subtitle.."  |  PAGE "..currentPage.."/"..pageCount().."  |  NEXT "..remaining.."s"
     end
     writeAt(3,3,shorten(subtitle,math.max(10,refreshButton.x1-5)),theme.headerSub,theme.header)
-
-    drawButton(refreshButton,refresh.running and "REFRESHING..." or "REFRESH TARGETS",
-        refresh.running and theme.refreshPressed or theme.refresh)
+    drawButton(refreshButton,refresh.running and "REFRESHING..." or "REFRESH TARGETS",refresh.running and theme.refreshPressed or theme.refresh)
     drawButton(rebootButton,"REBOOT",theme.reboot)
     fill(1,6,width,6,theme.accent)
     headerDirty=false
 end
 
 local function drawProgress(card)
+    if not validRect(card.x1,card.y1,card.x2,card.y2) then return end
     local y=card.y1+3
     local x1=card.x1+2
     local x2=card.x2-2
     local width=x2-x1+1
     fill(x1,y,x2,y,theme.progressBg)
-
-    if hasError(card) then
-        center(x1,x2,y,errorText(card),theme.cardText,theme.progressBg)
-        return
-    end
-
+    if hasError(card) then center(x1,x2,y,errorText(card),theme.cardText,theme.progressBg); return end
     local p=percentage(card) or 0
     local filled=math.floor(width*p/100)
     if p>0 and filled<1 then filled=1 end
     if filled>width then filled=width end
     local color=progressColor(card)
     if filled>0 then fill(x1,y,x1+filled-1,y,color) end
-
     local text=shorten(commaNumber(card.amount).." / "..commaNumber(card.targetAmount),width)
     local tx=x1+math.floor((width-#text)/2)
     for i=1,#text do
@@ -396,12 +342,8 @@ local function drawProgress(card)
 end
 
 local function drawCard(card,slot)
-    card.x1=slot.x1
-    card.y1=slot.y1
-    card.x2=slot.x2
-    card.y2=slot.y2
-    card.borderPoints=slot.points
-
+    if not card or not slot then return end
+    card.x1=slot.x1; card.y1=slot.y1; card.x2=slot.x2; card.y2=slot.y2; card.borderPoints=slot.points
     fill(card.x1+1,card.y1+1,card.x2-1,card.y2-1,theme.card)
     center(card.x1+2,card.x2-2,card.y1+2,string.upper(card.name or "STORAGE"),theme.cardText,theme.card)
     drawProgress(card)
@@ -409,6 +351,7 @@ local function drawCard(card,slot)
 end
 
 local function drawPlaceholder(slot,index)
+    if not slot then return end
     border(slot.x1,slot.y1,slot.x2,slot.y2,theme.emptyBorder)
     fill(slot.x1+1,slot.y1+1,slot.x2-1,slot.y2-1,theme.empty)
     center(slot.x1+1,slot.x2-1,slot.y1+2,"AVAILABLE "..index,theme.emptyText,theme.empty)
@@ -419,17 +362,11 @@ local function countErrors()
     for _,id in ipairs(cardOrder) do if cards[id] and hasError(cards[id]) then n=n+1 end end
     return n
 end
-
 local function countLow()
     local n=0
-    for _,id in ipairs(cardOrder) do
-        local c=cards[id]
-        local p=c and percentage(c)
-        if c and (hasError(c) or (p and p<75)) then n=n+1 end
-    end
+    for _,id in ipairs(cardOrder) do local c=cards[id]; local p=c and percentage(c); if c and (hasError(c) or (p and p<75)) then n=n+1 end end
     return n
 end
-
 local function countRunning()
     local n=0
     for _,id in ipairs(cardOrder) do if cards[id] and cards[id].machineRunning then n=n+1 end end
@@ -445,18 +382,10 @@ local function drawFooter()
     footerDirty=false
 end
 
-local function tableCount(t)
-    local n=0
-    for _ in pairs(t) do n=n+1 end
-    return n
-end
+local function tableCount(t) local n=0 for _ in pairs(t) do n=n+1 end return n end
 
 local function drawPopup()
-    if not refresh.visible then
-        popupDirty=false
-        return
-    end
-
+    if not refresh.visible then popupDirty=false; return end
     local width,height=monitor.getSize()
     local popupWidth=math.min(60,width-8)
     local popupHeight=math.min(18,height-10)
@@ -464,24 +393,17 @@ local function drawPopup()
     local y1=math.floor((height-popupHeight)/2)+1
     local x2=x1+popupWidth-1
     local y2=y1+popupHeight-1
-
     border(x1,y1,x2,y2,theme.popupBorder)
     fill(x1+1,y1+1,x2-1,y2-1,theme.popup)
     center(x1+2,x2-2,y1+1,"TARGET REFRESH",theme.popupTitle,theme.popup)
-
     local success,failure=0,0
-    for _,r in pairs(refresh.responses) do
-        if r.success then success=success+1 else failure=failure+1 end
-    end
-    local summary=refresh.running and ("UPDATING "..tableCount(refresh.responses).."/"..tableCount(refresh.expected))
-        or (success.." UPDATED / "..failure.." FAILED")
+    for _,r in pairs(refresh.responses) do if r.success then success=success+1 else failure=failure+1 end end
+    local summary=refresh.running and ("UPDATING "..tableCount(refresh.responses).."/"..tableCount(refresh.expected)) or (success.." UPDATED / "..failure.." FAILED")
     center(x1+2,x2-2,y1+3,summary,colors.white,theme.popup)
-
     local ids,seen={},{}
     for id in pairs(refresh.expected) do ids[#ids+1]=id; seen[id]=true end
     for id in pairs(refresh.responses) do if not seen[id] then ids[#ids+1]=id end end
     table.sort(ids)
-
     local row=y1+5
     for _,id in ipairs(ids) do
         if row>=y2-1 then break end
@@ -517,7 +439,6 @@ local function fullDraw()
     fill(1,1,width,height,theme.background)
     drawHeader()
     rebuildVisibleMap()
-
     local slotIndex=1
     for globalIndex=firstIndex(),lastIndex() do
         local itemID=cardOrder[globalIndex]
@@ -525,12 +446,10 @@ local function fullDraw()
         if itemID and slot and cards[itemID] then drawCard(cards[itemID],slot) end
         slotIndex=slotIndex+1
     end
-
     while slotIndex<=cardsPerPage do
         drawPlaceholder(layoutSlots[slotIndex],(currentPage-1)*cardsPerPage+slotIndex)
         slotIndex=slotIndex+1
     end
-
     drawFooter()
     if refresh.visible then drawPopup() end
     dirtyCards={}
@@ -549,7 +468,6 @@ local function drawChase(card,itemID)
     local points=card.borderPoints
     if not points or #points==0 then return end
     restoreOldChase(itemID,card)
-
     local start=(chaseFrame%#points)+1
     local drawn={}
     for offset=0,chaseLength-1 do
@@ -576,15 +494,11 @@ end
 local function animate()
     if refresh.visible then return end
     chaseFrame=chaseFrame+1
-
     for itemID,slotIndex in pairs(visibleByItem) do
         local card=cards[itemID]
         if card and layoutSlots[slotIndex] then
-            if card.machineRunning then
-                drawChase(card,itemID)
-            elseif chaseDrawn[itemID] then
-                restoreOldChase(itemID,card)
-            end
+            if card.machineRunning then drawChase(card,itemID)
+            elseif chaseDrawn[itemID] then restoreOldChase(itemID,card) end
         end
     end
 end
@@ -594,12 +508,13 @@ local function flashCritical()
     if time-lastFlash<flashInterval*1000 then return end
     lastFlash=time
     flashState=not flashState
-
     for itemID,slotIndex in pairs(visibleByItem) do
         local card=cards[itemID]
-        if card and not card.machineRunning then
+        local slot=layoutSlots[slotIndex]
+        if card and slot and not card.machineRunning then
             local p=percentage(card)
             if hasError(card) or (p and p<25) then
+                card.x1=slot.x1; card.y1=slot.y1; card.x2=slot.x2; card.y2=slot.y2; card.borderPoints=slot.points
                 border(card.x1,card.y1,card.x2,card.y2,baseBorderColor(card))
             end
         end
@@ -610,13 +525,9 @@ local function processStorageManifest(senderID,message)
     rememberComputer(senderID,message.role or "STORAGE")
     if type(message.enabledKeys)~="table" then return end
     local enabled={}
-    for _,itemID in ipairs(message.enabledKeys) do
-        if type(itemID)=="string" then enabled[itemID]=true end
-    end
+    for _,itemID in ipairs(message.enabledKeys) do if type(itemID)=="string" then enabled[itemID]=true end end
     local source=ensureSource(senderID)
-    for itemID in pairs(source) do
-        if not enabled[itemID] then source[itemID]=nil; structureDirty=true; dataDirty=true end
-    end
+    for itemID in pairs(source) do if not enabled[itemID] then source[itemID]=nil; structureDirty=true; dataDirty=true end end
 end
 
 local function processInventoryUpdate(senderID,message)
@@ -625,16 +536,9 @@ local function processInventoryUpdate(senderID,message)
     if type(itemID)~="string" then return end
     local source=ensureSource(senderID)
     local previous=source[itemID]
-    source[itemID]={
-        itemID=itemID,
-        displayName=message.displayName or itemID,
-        amount=tonumber(message.amount) or 0,
-        targetAmount=tonumber(message.targetAmount or message.target) or 0,
-        found=message.found~=false,
-        online=message.online~=false,
-        error=message.error,
-        lastUpdate=now()
-    }
+    source[itemID]={itemID=itemID,displayName=message.displayName or itemID,amount=tonumber(message.amount) or 0,
+        targetAmount=tonumber(message.targetAmount or message.target) or 0,found=message.found~=false,
+        online=message.online~=false,error=message.error,lastUpdate=now()}
     if not previous then structureDirty=true end
     dirtyCards[itemID]=true
     dataDirty=true
@@ -644,13 +548,7 @@ local function processMachineStatus(senderID,message)
     rememberComputer(senderID,message.role or "NODE")
     if type(message.itemID)~="string" then return end
     local old=machineStates[message.itemID]
-    machineStates[message.itemID]={
-        running=message.state==true,
-        computerID=senderID,
-        machineKey=message.machineKey,
-        side=message.side,
-        lastUpdate=now()
-    }
+    machineStates[message.itemID]={running=message.state==true,computerID=senderID,machineKey=message.machineKey,side=message.side,lastUpdate=now()}
     if not old or old.running~=(message.state==true) then dirtyCards[message.itemID]=true end
     dataDirty=true
 end
@@ -659,12 +557,7 @@ local function processRefreshStatus(senderID,message)
     rememberComputer(senderID,message.role or "NODE")
     if message.command~="targets_refresh_status" then return end
     refresh.visible=true
-    refresh.responses[senderID]={
-        success=message.success==true,
-        error=message.error,
-        role=message.role or (knownComputers[senderID] and knownComputers[senderID].role) or "NODE",
-        timestamp=now()
-    }
+    refresh.responses[senderID]={success=message.success==true,error=message.error,role=message.role or (knownComputers[senderID] and knownComputers[senderID].role) or "NODE",timestamp=now()}
     popupDirty=true
 end
 
@@ -674,18 +567,10 @@ local function requestDiscovery()
 end
 
 local function forceTargetRefresh()
-    refresh.visible=true
-    refresh.running=true
-    refresh.started=now()
-    refresh.finishedAt=0
-    refresh.responses={}
-    refresh.expected={}
+    refresh.visible=true; refresh.running=true; refresh.started=now(); refresh.finishedAt=0; refresh.responses={}; refresh.expected={}
     local t=now()
-    for id,info in pairs(knownComputers) do
-        if t-(info.lastSeen or 0)<=sourceOfflineSeconds*1000 then refresh.expected[id]=true end
-    end
-    popupDirty=true
-    structureDirty=true
+    for id,info in pairs(knownComputers) do if t-(info.lastSeen or 0)<=sourceOfflineSeconds*1000 then refresh.expected[id]=true end end
+    popupDirty=true; structureDirty=true
     rednet.broadcast({command="force_targets_refresh",requestedBy=os.getComputerID(),timestamp=now()},configControlProtocol)
 end
 
@@ -693,55 +578,39 @@ local function updateRefresh()
     if not refresh.visible then return end
     local t=now()
     if refresh.running then
-        if (tableCount(refresh.expected)>0 and tableCount(refresh.responses)>=tableCount(refresh.expected))
-            or t-refresh.started>=refreshWaitSeconds*1000 then
-            refresh.running=false
-            refresh.finishedAt=t
-            pageChangedAt=t
-            popupDirty=true
-            headerDirty=true
+        if (tableCount(refresh.expected)>0 and tableCount(refresh.responses)>=tableCount(refresh.expected)) or t-refresh.started>=refreshWaitSeconds*1000 then
+            refresh.running=false; refresh.finishedAt=t; pageChangedAt=t; popupDirty=true; headerDirty=true
         end
     elseif refresh.finishedAt>0 and t-refresh.finishedAt>=refreshResultSeconds*1000 then
-        refresh.visible=false
-        pageChangedAt=t
-        structureDirty=true
-        headerDirty=true
+        refresh.visible=false; pageChangedAt=t; structureDirty=true; headerDirty=true
     end
 end
 
 local function updatePage()
     local pages=pageCount()
-    if pages<=1 then
-        if currentPage~=1 then currentPage=1; structureDirty=true end
-        pageChangedAt=now()
-        return
-    end
+    if pages<=1 then if currentPage~=1 then currentPage=1; structureDirty=true end; pageChangedAt=now(); return end
     if refresh.visible then return end
     if now()-pageChangedAt>=pageSeconds*1000 then
-        currentPage=currentPage+1
-        if currentPage>pages then currentPage=1 end
-        pageChangedAt=now()
-        structureDirty=true
-        headerDirty=true
+        currentPage=currentPage+1; if currentPage>pages then currentPage=1 end
+        pageChangedAt=now(); structureDirty=true; headerDirty=true
     end
 end
 
+-- IMPORTANT: this function is read-only. It must never call rebuildCards().
+-- The previous version rebuilt the shared card table from a parallel loop,
+-- replacing cards while the display loop was drawing them. That caused nil
+-- coordinates and the line-101 crash seen on the Main Storage Screen.
 local function buildLowSummary()
-    rebuildCards()
     local low={}
-    for _,itemID in ipairs(cardOrder) do
-        local card=cards[itemID]
+    local snapshotCards=cards
+    local snapshotOrder=cardOrder
+    for _,itemID in ipairs(snapshotOrder) do
+        local card=snapshotCards[itemID]
         local p=card and percentage(card)
         if card and (hasError(card) or (p and p<75)) then
-            low[#low+1]={
-                itemID=itemID,
-                name=card.name or itemID,
-                amount=tonumber(card.amount) or 0,
-                target=tonumber(card.targetAmount) or 0,
-                percent=p,
-                error=hasError(card) and errorText(card) or nil,
-                machineRunning=card.machineRunning==true
-            }
+            low[#low+1]={itemID=itemID,name=card.name or itemID,amount=tonumber(card.amount) or 0,
+                target=tonumber(card.targetAmount) or 0,percent=p,
+                error=hasError(card) and errorText(card) or nil,machineRunning=card.machineRunning==true}
         end
     end
     table.sort(low,function(a,b)
@@ -755,84 +624,52 @@ local function buildLowSummary()
 end
 
 local function broadcastLowResources()
-    rednet.broadcast({
-        messageType="low_resource_summary",
-        resources=buildLowSummary(),
-        totalResources=#cardOrder,
-        timestamp=now(),
-        computerID=os.getComputerID()
-    },systemStatusProtocol)
+    local summary=buildLowSummary()
+    rednet.broadcast({messageType="low_resource_summary",resources=summary,totalResources=#cardOrder,
+        timestamp=now(),computerID=os.getComputerID()},systemStatusProtocol)
 end
 
 local function eventLoop()
     local discoveryTimer=os.startTimer(discoveryInterval)
     local staleTimer=os.startTimer(2)
-
     while true do
         local event,a,b,c=os.pullEvent()
-
         if event=="rednet_message" then
             local senderID,message,protocol=a,b,c
             if protocol==storageStatusProtocol and type(message)=="table" then
                 if message.messageType=="storage_manifest" then processStorageManifest(senderID,message)
                 elseif message.messageType=="inventory_update" then processInventoryUpdate(senderID,message) end
-            elseif protocol==machineStatusProtocol and type(message)=="table"
-                and message.messageType=="resource_machine_status" then
+            elseif protocol==machineStatusProtocol and type(message)=="table" and message.messageType=="resource_machine_status" then
                 processMachineStatus(senderID,message)
-            elseif protocol==configStatusProtocol and type(message)=="table" then
-                processRefreshStatus(senderID,message)
-            end
-
+            elseif protocol==configStatusProtocol and type(message)=="table" then processRefreshStatus(senderID,message) end
         elseif event=="monitor_touch" and a==monitorName then
             if not refresh.visible then
                 local x,y=b,c
-                if inside(x,y,rebootButton) then
-                    drawButton(rebootButton,"REBOOTING",theme.rebootPressed)
-                    sleep(0.15)
-                    os.reboot()
-                elseif inside(x,y,refreshButton) then
-                    forceTargetRefresh()
-                end
+                if inside(x,y,rebootButton) then drawButton(rebootButton,"REBOOTING",theme.rebootPressed); sleep(0.15); os.reboot()
+                elseif inside(x,y,refreshButton) then forceTargetRefresh() end
             end
-
         elseif event=="timer" and a==discoveryTimer then
-            requestDiscovery()
-            discoveryTimer=os.startTimer(discoveryInterval)
-
+            requestDiscovery(); discoveryTimer=os.startTimer(discoveryInterval)
         elseif event=="timer" and a==staleTimer then
-            dataDirty=true
-            footerDirty=true
-            staleTimer=os.startTimer(2)
-
+            dataDirty=true; footerDirty=true; staleTimer=os.startTimer(2)
         elseif event=="monitor_resize" and a==monitorName then
-            monitor.setTextScale(0.5)
-            calculateLayout()
-            structureDirty=true
+            monitor.setTextScale(0.5); calculateLayout(); structureDirty=true
         end
     end
 end
 
 local function displayLoop()
     while true do
-        updateRefresh()
-        updatePage()
-
-        if dataDirty then
-            rebuildCards()
-            dataDirty=false
-        end
-
+        updateRefresh(); updatePage()
+        if dataDirty then rebuildCards(); dataDirty=false end
         if structureDirty then
             fullDraw()
         else
             if headerDirty then drawHeader() end
             if footerDirty then drawFooter() end
             if popupDirty then drawPopup() end
-            drawDirtyCards()
-            flashCritical()
-            animate()
+            drawDirtyCards(); flashCritical(); animate()
         end
-
         sleep(animationSpeed)
     end
 end
@@ -848,5 +685,4 @@ calculateLayout()
 fullDraw()
 requestDiscovery()
 broadcastLowResources()
-
 parallel.waitForAll(eventLoop,displayLoop,lowSummaryLoop)
