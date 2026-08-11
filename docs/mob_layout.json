@@ -81,6 +81,26 @@
     "1,5": {
       "type": "computer",
       "id": 26
+    },
+    "1,9": {
+      "type": "computer",
+      "id": 20
+    },
+    "2,9": {
+      "type": "spawner",
+      "mob": "Squid"
+    },
+    "0,9": {
+      "type": "spawner",
+      "mob": "Spider"
+    },
+    "1,8": {
+      "type": "spawner",
+      "mob": "Ghast"
+    },
+    "1,10": {
+      "type": "spawner",
+      "mob": "Skeleton"
     }
   }
 }
