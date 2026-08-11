@@ -1,5 +1,86 @@
 {
   "version": 1,
   "size": 16,
-  "tiles": {}
+  "tiles": {
+    "0,1": {
+      "type": "spawner",
+      "mob": "N/A"
+    },
+    "1,0": {
+      "type": "spawner",
+      "mob": "N/A"
+    },
+    "1,2": {
+      "type": "spawner",
+      "mob": "N/A"
+    },
+    "2,1": {
+      "type": "spawner",
+      "mob": "N/A"
+    },
+    "4,1": {
+      "type": "spawner",
+      "mob": "N/A"
+    },
+    "5,0": {
+      "type": "spawner",
+      "mob": "N/A"
+    },
+    "6,1": {
+      "type": "spawner",
+      "mob": "N/A"
+    },
+    "6,5": {
+      "type": "spawner",
+      "mob": "N/A"
+    },
+    "5,2": {
+      "type": "spawner",
+      "mob": "Witch"
+    },
+    "5,4": {
+      "type": "spawner",
+      "mob": "Zombie"
+    },
+    "4,5": {
+      "type": "spawner",
+      "mob": "Enderman"
+    },
+    "5,6": {
+      "type": "spawner",
+      "mob": "Charged Creeper"
+    },
+    "0,5": {
+      "type": "spawner",
+      "mob": "Wilden Hunter"
+    },
+    "2,5": {
+      "type": "spawner",
+      "mob": "Wilden Defender"
+    },
+    "1,4": {
+      "type": "spawner",
+      "mob": "Wilden Stalker"
+    },
+    "1,6": {
+      "type": "spawner",
+      "mob": "Wither Skeleton"
+    },
+    "1,1": {
+      "type": "computer",
+      "id": 5
+    },
+    "5,1": {
+      "type": "computer",
+      "id": 6
+    },
+    "5,5": {
+      "type": "computer",
+      "id": 24
+    },
+    "1,5": {
+      "type": "computer",
+      "id": 26
+    }
+  }
 }
